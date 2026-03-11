@@ -41,6 +41,7 @@ def test_hosted_deploy_script_keeps_healthcheck_and_metadata_contract():
     assert "last-success.env" in script
     assert "current-sha.txt" in script
     assert "systemctl restart novwr" in script
+    assert '"$py_bin" -m pip install -r requirements.txt' in script
 
 
 def test_hosted_deploy_workflow_bootstraps_script_from_origin_master_for_rollbacks():
