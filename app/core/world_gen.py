@@ -22,7 +22,6 @@ from app.schemas import (
     WorldGenerateWarning,
 )
 from app.core.text import PromptKey, get_prompt
-from app.world_relationships import canonicalize_relationship_label
 
 logger = logging.getLogger(__name__)
 
