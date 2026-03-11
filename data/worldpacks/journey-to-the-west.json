@@ -592,21 +592,15 @@
     },
     {
       "name": "三界势力格局",
-      "display_type": "graph",
+      "display_type": "list",
       "description": "天庭、佛门、妖族三方势力的关系网络",
       "data": {
-        "nodes": [
-          { "id": "tianting-node", "label": "天庭", "position": { "x": 0, "y": 0 } },
-          { "id": "fomen-node", "label": "佛门", "position": { "x": 300, "y": 0 } },
-          { "id": "yaozu-node", "label": "妖族", "position": { "x": 150, "y": 250 } },
-          { "id": "renjian-node", "label": "人间（大唐）", "position": { "x": 150, "y": -200 } }
-        ],
-        "edges": [
-          { "from": "tianting-node", "to": "fomen-node", "label": "合作但暗中博弈" },
-          { "from": "tianting-node", "to": "yaozu-node", "label": "镇压" },
-          { "from": "fomen-node", "to": "yaozu-node", "label": "收服/渡化" },
-          { "from": "tianting-node", "to": "renjian-node", "label": "统治" },
-          { "from": "fomen-node", "to": "renjian-node", "label": "传经扩张" }
+        "items": [
+          { "id": "power-1", "label": "天庭 ↔ 佛门", "description": "合作但暗中博弈" },
+          { "id": "power-2", "label": "天庭 → 妖族", "description": "镇压" },
+          { "id": "power-3", "label": "佛门 → 妖族", "description": "收服/渡化" },
+          { "id": "power-4", "label": "天庭 → 人间（大唐）", "description": "统治" },
+          { "id": "power-5", "label": "佛门 → 人间（大唐）", "description": "传经扩张" }
         ]
       },
       "constraints": [],
