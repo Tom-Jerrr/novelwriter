@@ -41,3 +41,11 @@ def test_hosted_deploy_script_keeps_healthcheck_and_metadata_contract():
     assert "last-success.env" in script
     assert "current-sha.txt" in script
     assert "systemctl restart novwr" in script
+
+
+def test_hosted_deploy_workflow_bootstraps_script_from_origin_master_for_rollbacks():
+    workflow = _read(".github/workflows/deploy-hosted.yml")
+
+    assert "git show origin/master:scripts/deploy_hosted.sh" in workflow
+    assert "bash .deploy/deploy_hosted.sh" in workflow
+    assert "git checkout --detach %q && NOVWR_PREVIOUS_SHA" not in workflow
