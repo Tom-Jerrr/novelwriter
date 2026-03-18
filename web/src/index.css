@@ -267,6 +267,16 @@
   will-change: transform;
 }
 
+html[data-perf-mode='lite'] [class*='backdrop-blur'] {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-route-surface='workspace'] [class*='backdrop-blur']:not(.nw-preserve-backdrop-blur) {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
 /* Violet blob — top-left */
 .blob-1 {
   width: 700px;

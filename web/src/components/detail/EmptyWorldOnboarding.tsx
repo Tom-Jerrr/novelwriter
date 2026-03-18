@@ -34,7 +34,7 @@ export function EmptyWorldOnboarding({
             asChild
             variant="container"
             hoverable
-            className="rounded-2xl p-6 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="nw-preserve-backdrop-blur rounded-2xl p-6 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <button
               type="button"
@@ -59,7 +59,7 @@ export function EmptyWorldOnboarding({
             asChild
             variant="container"
             hoverable
-            className="rounded-2xl p-6 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="nw-preserve-backdrop-blur rounded-2xl p-6 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <button
               type="button"

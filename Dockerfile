@@ -4,8 +4,10 @@ WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ .
+ARG VITE_API_URL=""
+ARG VITE_DEPLOY_MODE=selfhost
 # Empty VITE_API_URL -> same-origin requests (no CORS needed)
-RUN VITE_API_URL="" npm run build
+RUN VITE_API_URL="$VITE_API_URL" VITE_DEPLOY_MODE="$VITE_DEPLOY_MODE" npm run build
 
 # Stage 2: Python backend + serve frontend static
 FROM python:3.11-slim
@@ -19,6 +21,8 @@ COPY app/ app/
 COPY alembic/ alembic/
 COPY alembic.ini .
 COPY data/common_words/ data/common_words/
+COPY data/demo/ data/demo/
+COPY data/worldpacks/ data/worldpacks/
 
 COPY --from=frontend-build /web/dist/ /app/static/
 

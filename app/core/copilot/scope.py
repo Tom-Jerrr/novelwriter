@@ -387,11 +387,11 @@ def _gather_chapter_evidence(
     if len(items) < 3 and snapshot.focus_variant != "whole_book":
         fallback_reason = "最近章节上下文"
         if lifecycle and lifecycle.status == WINDOW_INDEX_STATUS_STALE:
-            fallback_reason = "检索索引待刷新，先回退到最近章节上下文"
+            fallback_reason = "章节有更新，先回退到最近章节上下文"
         elif lifecycle and lifecycle.status == WINDOW_INDEX_STATUS_MISSING:
-            fallback_reason = "检索索引尚未就绪，先回退到最近章节上下文"
+            fallback_reason = "全书内容还在准备中，先回退到最近章节上下文"
         elif lifecycle and lifecycle.status == WINDOW_INDEX_STATUS_FAILED:
-            fallback_reason = "检索索引构建失败，先回退到最近章节上下文"
+            fallback_reason = "全书内容整理失败，先回退到最近章节上下文"
         chapters = (
             db.query(Chapter)
             .filter(Chapter.novel_id == novel.id)

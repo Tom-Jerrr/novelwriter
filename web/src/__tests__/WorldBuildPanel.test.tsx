@@ -114,7 +114,7 @@ describe('WorldBuildPanel', () => {
     expect(screen.getByText('从章节提取')).toBeTruthy()
     expect(screen.getByTestId('novel-copilot-trigger')).toBeTruthy()
     expect(screen.getByText('从全书视角检索设定缺口、潜在线索与值得进一步研究的世界锚点。')).toBeTruthy()
-    expect(screen.getByText('检索索引尚未就绪；当前会先回退到最近章节。')).toBeTruthy()
+    expect(screen.getByText('全书内容还在准备中；当前会先参考最近几章。')).toBeTruthy()
 
     // Running
     mockUseBootstrapStatus.mockReturnValue({

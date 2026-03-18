@@ -14,52 +14,52 @@ export function isWindowIndexRebuilding(state: WindowIndexState | null | undefin
 
 export function getWindowIndexBootstrapStatusMeta(state: WindowIndexState | null | undefined): WindowIndexStatusMeta {
   if (!state) {
-    return { text: '检索索引状态读取中', tone: 'muted', requiresFallback: false }
+    return { text: '正在准备全书内容', tone: 'muted', requiresFallback: false }
   }
   if (isWindowIndexRebuilding(state) && state.status !== 'fresh') {
-    return { text: '检索索引更新中', tone: 'muted', requiresFallback: true }
+    return { text: '正在整理章节内容', tone: 'muted', requiresFallback: true }
   }
   switch (state.status) {
     case 'fresh':
-      return { text: '检索索引已就绪', tone: 'success', requiresFallback: false }
+      return { text: '已可从全书中查找线索', tone: 'success', requiresFallback: false }
     case 'stale':
-      return { text: '检索索引待刷新', tone: 'warning', requiresFallback: true }
+      return { text: '章节更新后待同步', tone: 'warning', requiresFallback: true }
     case 'missing':
-      return { text: '检索索引尚未就绪', tone: 'warning', requiresFallback: true }
+      return { text: '还在准备全书内容', tone: 'warning', requiresFallback: true }
     case 'failed':
-      return { text: '检索索引刷新失败', tone: 'warning', requiresFallback: true }
+      return { text: '全书检索暂不可用', tone: 'warning', requiresFallback: true }
   }
 }
 
 export function getWindowIndexCopilotStatusMeta(state: WindowIndexState | null | undefined): WindowIndexStatusMeta {
   if (!state) {
-    return { text: '正在读取检索索引状态。', tone: 'muted', requiresFallback: false }
+    return { text: '正在准备全书内容。', tone: 'muted', requiresFallback: false }
   }
   if (isWindowIndexRebuilding(state) && state.status !== 'fresh') {
     return {
-      text: '章节有更新，检索索引正在刷新；当前会先回退到最近章节。',
+      text: '章节有更新，正在整理全书内容；当前会先参考最近几章。',
       tone: 'muted',
       requiresFallback: true,
     }
   }
   switch (state.status) {
     case 'fresh':
-      return { text: '检索索引已就绪，可直接进行全书检索。', tone: 'success', requiresFallback: false }
+      return { text: '已可直接跨章节查找设定、人物与线索。', tone: 'success', requiresFallback: false }
     case 'stale':
       return {
-        text: '章节有更新，检索索引待刷新；当前会先回退到最近章节。',
+        text: '章节有更新，正在同步全书内容；当前会先参考最近几章。',
         tone: 'warning',
         requiresFallback: true,
       }
     case 'missing':
       return {
-        text: '检索索引尚未就绪；当前会先回退到最近章节。',
+        text: '全书内容还在准备中；当前会先参考最近几章。',
         tone: 'warning',
         requiresFallback: true,
       }
     case 'failed':
       return {
-        text: '检索索引刷新失败；当前会先回退到最近章节。',
+        text: '全书内容暂时整理失败；当前会先参考最近几章。',
         tone: 'warning',
         requiresFallback: true,
       }

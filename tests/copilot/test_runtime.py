@@ -406,9 +406,9 @@ class TestBackendEvidence:
     @pytest.mark.parametrize(
         ("prepare_state", "expected_reason"),
         [
-            ("missing", "检索索引尚未就绪，先回退到最近章节上下文"),
-            ("stale", "检索索引待刷新，先回退到最近章节上下文"),
-            ("failed", "检索索引构建失败，先回退到最近章节上下文"),
+            ("missing", "全书内容还在准备中，先回退到最近章节上下文"),
+            ("stale", "章节有更新，先回退到最近章节上下文"),
+            ("failed", "全书内容整理失败，先回退到最近章节上下文"),
         ],
     )
     def test_entity_scope_falls_back_with_explicit_reason(

@@ -27,7 +27,7 @@ const glassSurfaceVariants = cva('border-[var(--nw-glass-border)] text-foregroun
        * More opaque base for readability + deeper shadow for separation.
        */
       floating:
-        'bg-[hsl(var(--background)/0.75)] backdrop-blur-[20px] shadow-[0_18px_50px_rgba(0,0,0,0.55)]',
+        'nw-preserve-backdrop-blur bg-[hsl(var(--background)/0.75)] backdrop-blur-[20px] shadow-[0_18px_50px_rgba(0,0,0,0.55)]',
     },
     bordered: {
       true: 'border',

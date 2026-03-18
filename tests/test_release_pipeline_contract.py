@@ -47,10 +47,37 @@ def test_hosted_deploy_script_keeps_healthcheck_and_metadata_contract():
     assert '"$py_bin" -m pip install -r requirements.txt' in script
 
 
+def test_dockerfile_allows_frontend_build_mode_overrides():
+    dockerfile = _read("Dockerfile")
+
+    assert "ARG VITE_DEPLOY_MODE=selfhost" in dockerfile
+    assert 'VITE_DEPLOY_MODE="$VITE_DEPLOY_MODE"' in dockerfile
+    assert "COPY data/demo/ data/demo/" in dockerfile
+    assert "COPY data/worldpacks/ data/worldpacks/" in dockerfile
+
+
+def test_docker_build_context_keeps_demo_seed_assets():
+    dockerignore = _read(".dockerignore")
+
+    assert "!data/demo/" in dockerignore
+    assert "!data/demo/**" in dockerignore
+    assert "!data/worldpacks/" in dockerignore
+    assert "!data/worldpacks/**" in dockerignore
+
+
+def test_hosted_compose_builds_frontend_in_hosted_mode():
+    compose = _read("deploy/hosted/docker-compose.yml")
+
+    assert "VITE_DEPLOY_MODE: hosted" in compose
+
+
 def test_hosted_deploy_workflow_bootstraps_script_from_origin_master_for_rollbacks():
     workflow = _read(".github/workflows/deploy-hosted.yml")
 
     assert "git show origin/master:scripts/deploy_hosted.sh" in workflow
     assert "bash .deploy/deploy_hosted.sh" in workflow
-    assert "git fetch origin refs/heads/master:refs/remotes/origin/master --tags --force" in workflow
+    assert (
+        "git fetch origin refs/heads/master:refs/remotes/origin/master --tags --force"
+        in workflow
+    )
     assert "git checkout --detach %q && NOVWR_PREVIOUS_SHA" not in workflow

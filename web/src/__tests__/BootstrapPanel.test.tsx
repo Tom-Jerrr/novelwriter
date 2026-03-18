@@ -75,7 +75,7 @@ describe('BootstrapPanel (sidebar variant)', () => {
     })
     renderPanel()
     expect(screen.getByText('从章节提取')).toBeTruthy()
-    expect(screen.getByText('检索索引尚未就绪')).toBeTruthy()
+    expect(screen.getByText('还在准备全书内容')).toBeTruthy()
   })
 
   it('renders completed state with compact summary', () => {
@@ -83,7 +83,7 @@ describe('BootstrapPanel (sidebar variant)', () => {
     renderPanel()
     expect(screen.getByText('从章节提取')).toBeTruthy()
     expect(screen.getByText('10 实体 · 5 关系')).toBeTruthy()
-    expect(screen.getByText('检索索引已就绪')).toBeTruthy()
+    expect(screen.getByText('已可从全书中查找线索')).toBeTruthy()
   })
 
   it('uses legacy fallback and shows completed row when initialized field is missing', () => {
@@ -105,7 +105,7 @@ describe('BootstrapPanel (sidebar variant)', () => {
     }
     mockUseBootstrapStatus.mockReturnValue({ data: refreshOnlyJob, isLoading: false })
     renderPanel()
-    expect(screen.getByText('检索索引已刷新')).toBeTruthy()
+    expect(screen.getByText('全书检索已更新')).toBeTruthy()
   })
 
   it('renders failed state with retry hint', () => {
@@ -117,7 +117,7 @@ describe('BootstrapPanel (sidebar variant)', () => {
     renderPanel()
     expect(screen.getByText(/执行失败/)).toBeTruthy()
     expect(screen.getByText(/重试/)).toBeTruthy()
-    expect(screen.getByText('检索索引刷新失败')).toBeTruthy()
+    expect(screen.getByText('全书检索暂不可用')).toBeTruthy()
   })
 
   it('renders running state with progress bar and step label', () => {
