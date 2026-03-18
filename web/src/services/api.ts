@@ -47,6 +47,7 @@ import { copilotApi } from './copilotApi'
 
 const listNovels = () => request<Novel[]>('/api/novels')
 const listChapters = (novelId: number) => request<Chapter[]>(`/api/novels/${novelId}/chapters`)
+const UPLOAD_CONSENT_VERSION = '2026-03-06'
 
 export const api = {
   login: async (username: string, password: string) => {
@@ -106,13 +107,13 @@ export const api = {
   getNovel: (id: number | string) => request<Novel>(`/api/novels/${encodeURIComponent(String(id))}`),
   deleteNovel: (id: number) =>
     request<void>(`/api/novels/${id}`, { method: 'DELETE' }),
-  uploadNovel: async (file: File, title: string, author = '', consentVersion = '') => {
+  uploadNovel: async (file: File, title: string, author = '') => {
     const form = new FormData()
     form.append('file', file)
     form.append('title', title)
     form.append('author', author)
     form.append('consent_acknowledged', 'true')
-    form.append('consent_version', consentVersion)
+    form.append('consent_version', UPLOAD_CONSENT_VERSION)
     const res = await fetch(`${BASE_URL}/api/novels/upload`, {
       method: 'POST',
       credentials: 'include',

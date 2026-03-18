@@ -5,7 +5,6 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LibraryPage } from '@/pages/LibraryPage'
-import { getUploadConsentKey, UPLOAD_CONSENT_VERSION } from '@/lib/uploadConsent'
 
 const listNovels = vi.fn()
 const uploadNovel = vi.fn()
@@ -36,10 +35,6 @@ vi.mock('@/lib/worldOnboardingStorage', () => ({
   clearWorldOnboardingDismissed: vi.fn(),
 }))
 
-vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 7 } }),
-}))
-
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -54,36 +49,19 @@ function renderPage() {
 describe('LibraryPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
-    localStorage.clear()
     listNovels.mockResolvedValue([])
     uploadNovel.mockResolvedValue({ novel_id: 1, total_chapters: 2 })
   })
 
-  it('keeps upload disabled until consent is checked', async () => {
+  it('shows create actions without a legal consent gate', async () => {
     renderPage()
 
     const createButton = await screen.findByTestId('library-create-novel')
-    expect(createButton).toBeDisabled()
-
-    const checkbox = screen.getByRole('checkbox')
-    await userEvent.click(checkbox)
-
     expect(createButton).not.toBeDisabled()
-    expect(localStorage.getItem(getUploadConsentKey(7))).toBe('1')
+    expect(screen.queryByText('上传前先确认权利边界')).not.toBeInTheDocument()
   })
 
-  it('restores upload consent from localStorage', async () => {
-    localStorage.setItem(getUploadConsentKey(7), '1')
-
-    renderPage()
-
-    await waitFor(() => {
-      expect(screen.getByTestId('library-create-novel')).not.toBeDisabled()
-    })
-  })
-
-  it('submits consent version with upload', async () => {
-    localStorage.setItem(getUploadConsentKey(7), '1')
+  it('uploads immediately without a library-side consent step', async () => {
     renderPage()
 
     const input = screen.getByTestId('library-file-input') as HTMLInputElement
@@ -91,7 +69,7 @@ describe('LibraryPage', () => {
     await userEvent.upload(input, file)
 
     await waitFor(() => {
-      expect(uploadNovel).toHaveBeenCalledWith(file, 'test', '', UPLOAD_CONSENT_VERSION)
+      expect(uploadNovel).toHaveBeenCalledWith(file, 'test')
     })
   })
 })
