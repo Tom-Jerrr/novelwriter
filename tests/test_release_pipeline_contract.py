@@ -9,14 +9,16 @@ def _read(rel_path: str) -> str:
     return (ROOT / rel_path).read_text(encoding="utf-8")
 
 
-def test_release_tag_workflow_deploys_before_public_publish():
+def test_release_tag_workflow_publishes_public_history_without_hosted_deploy():
     workflow = _read(".github/workflows/release-tag.yml")
 
-    assert "uses: ./.github/workflows/deploy-hosted.yml" in workflow
     assert "uses: ./.github/workflows/mirror-public.yml" in workflow
-    assert re.search(r"publish-public:\n(?:.*\n)*?\s+needs:\s+deploy-hosted", workflow)
-    assert re.search(r"deploy-hosted:\n(?:.*\n)*?\s+id-token:\s+write", workflow)
+    assert "uses: ./.github/workflows/deploy-hosted.yml" not in workflow
     assert re.search(r"publish-public:\n(?:.*\n)*?\s+contents:\s+read", workflow)
+    assert "source_event_name: push" in workflow
+    assert "source_ref_type: tag" in workflow
+    assert "source_ref_name: ${{ github.ref_name }}" in workflow
+    assert "source_sha: ${{ github.sha }}" in workflow
 
 
 def test_mirror_public_workflow_is_reusable_and_still_manual_dispatchable():
@@ -26,6 +28,8 @@ def test_mirror_public_workflow_is_reusable_and_still_manual_dispatchable():
     assert "workflow_dispatch:" in workflow
     assert "source_sha:" in workflow
     assert "source_ref_name:" in workflow
+    assert "Manual public release must be dispatched from master" in workflow
+    assert "must point to a commit already merged into master" in workflow
 
 
 def test_internal_release_pipeline_files_stay_out_of_public_snapshot():
@@ -33,6 +37,7 @@ def test_internal_release_pipeline_files_stay_out_of_public_snapshot():
 
     assert ".github/workflows/deploy-hosted.yml" in excluded
     assert ".github/workflows/release-tag.yml" in excluded
+    assert ".github/workflows/mirror-public.yml" in excluded
     assert "scripts/deploy_hosted.sh" in excluded
 
 

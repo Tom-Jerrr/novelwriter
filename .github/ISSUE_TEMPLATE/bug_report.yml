@@ -18,8 +18,8 @@ body:
     id: version
     attributes:
       label: 版本号
-      description: 例如 v0.3.2；如果你是从源码运行，也请说明对应 tag、commit 或下载日期
-      placeholder: v0.3.2
+      description: 例如 v0.1.0；如果你是从源码运行，也请说明对应 tag、commit 或下载日期
+      placeholder: v0.1.0
     validations:
       required: true
 
