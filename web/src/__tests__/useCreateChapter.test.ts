@@ -35,6 +35,23 @@ describe('useCreateChapter', () => {
 
     const queryClient = createTestQueryClient()
     const invalidateQueriesSpy = vi.spyOn(queryClient, 'invalidateQueries')
+    queryClient.setQueryData(novelKeys.chaptersMeta(novelId), [
+      {
+        id: 99,
+        novel_id: novelId,
+        chapter_number: 3,
+        title: '旧第三章',
+        created_at: '2026-01-31T00:00:00Z',
+      },
+    ])
+    queryClient.setQueryData(novelKeys.detail(novelId), {
+      id: novelId,
+      title: '测试小说',
+      author: '作者',
+      total_chapters: 3,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-31T00:00:00Z',
+    })
 
     const { result } = renderHook(() => useCreateChapter(novelId), {
       wrapper: createQueryClientWrapper(queryClient),
@@ -47,6 +64,24 @@ describe('useCreateChapter', () => {
 
     expect(mockCreateChapter).toHaveBeenCalledWith(novelId, payload)
     expect(mutationResult).toEqual(createdChapter)
+    expect(queryClient.getQueryData(novelKeys.chapter(novelId, 4))).toEqual(createdChapter)
+    expect(queryClient.getQueryData(novelKeys.chaptersMeta(novelId))).toEqual([
+      {
+        id: 99,
+        novel_id: novelId,
+        chapter_number: 3,
+        title: '旧第三章',
+        created_at: '2026-01-31T00:00:00Z',
+      },
+      {
+        id: 101,
+        novel_id: novelId,
+        chapter_number: 4,
+        title: '新章',
+        created_at: '2026-02-01T00:00:00Z',
+      },
+    ])
+    expect(queryClient.getQueryData(novelKeys.detail(novelId))).toMatchObject({ total_chapters: 4 })
     expect(invalidateQueriesSpy).toHaveBeenCalledWith({ queryKey: novelKeys.chaptersMeta(novelId) })
     expect(invalidateQueriesSpy).toHaveBeenCalledWith({ queryKey: novelKeys.detail(novelId) })
   })

@@ -259,6 +259,83 @@ class TestWriterContext:
         system_names = [s["name"] for s in ctx.get("systems", [])]
         assert "draft体系" not in system_names
 
+    def test_english_matching_is_case_insensitive_and_word_boundary_aware(self, db):
+        from app.core.context_assembly import assemble_writer_context
+        from app.models import WorldEntity
+
+        english_novel = Novel(
+            title="English Novel",
+            author="Tester",
+            language="en",
+            file_path="/tmp/english.txt",
+            total_chapters=1,
+        )
+        db.add(english_novel)
+        db.commit()
+        db.refresh(english_novel)
+
+        alice = WorldEntity(
+            novel_id=english_novel.id,
+            name="Alice",
+            entity_type="Character",
+            description="Lead",
+            status="confirmed",
+        )
+        al = WorldEntity(
+            novel_id=english_novel.id,
+            name="Al",
+            entity_type="Character",
+            description="Different person",
+            status="confirmed",
+        )
+        db.add_all([alice, al])
+        db.commit()
+
+        ctx = assemble_writer_context(
+            db,
+            english_novel.id,
+            chapter_text="alice walked home. Later, ALICE called Bob.",
+        )
+
+        entity_names = [e["name"] for e in ctx["entities"]]
+        assert "Alice" in entity_names
+        assert "Al" not in entity_names
+
+    def test_english_matching_treats_possessive_apostrophes_as_boundaries(self, db):
+        from app.core.context_assembly import assemble_writer_context
+        from app.models import WorldEntity
+
+        english_novel = Novel(
+            title="English Novel",
+            author="Tester",
+            language="en",
+            file_path="/tmp/english.txt",
+            total_chapters=1,
+        )
+        db.add(english_novel)
+        db.commit()
+        db.refresh(english_novel)
+
+        db.add(
+            WorldEntity(
+                novel_id=english_novel.id,
+                name="Alice",
+                entity_type="Character",
+                description="Lead",
+                status="confirmed",
+            )
+        )
+        db.commit()
+
+        ctx = assemble_writer_context(
+            db,
+            english_novel.id,
+            chapter_text="Alice's lantern dimmed. Later, Alice’s vow returned.",
+        )
+
+        entity_names = [e["name"] for e in ctx["entities"]]
+        assert entity_names == ["Alice"]
+
     def test_end_to_end_chapter_context(self, db, populated_world):
         """Real scenario: chapter mentions multiple entities, verify combined context."""
         from app.core.context_assembly import assemble_writer_context

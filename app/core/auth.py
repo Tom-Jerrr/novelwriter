@@ -39,6 +39,26 @@ oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_e
 SESSION_COOKIE_NAME = "novwr_session"
 
 
+def _raise_quota_http_error(*, count: int = 1, have: int | None = None) -> None:
+    exhausted = count <= 1
+    message = (
+        "Generation quota exhausted. Submit feedback to unlock more."
+        if exhausted
+        else f"Not enough quota for this request (need {count}, have {have if have is not None else 0}). Submit feedback to unlock more."
+    )
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail={
+            "code": "generation_quota_exhausted" if exhausted else "generation_quota_insufficient",
+            "message": message,
+            "meta": {
+                "need": count,
+                "have": have,
+            },
+        },
+    )
+
+
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
@@ -183,8 +203,8 @@ def check_generation_quota(
 ) -> User:
     """Dependency stub — validates quota > 0 but does NOT decrement.
 
-    Actual decrement happens via decrement_quota() in the endpoint body,
-    where num_versions is known.
+    Actual reservation / decrement happens in the endpoint or background
+    workflow once the concrete billable unit is known.
     """
     ensure_ai_available(db, billing_source=_resolve_generation_billing_source(request))
 
@@ -199,10 +219,7 @@ def check_generation_quota(
             pass
 
     if current_user.generation_quota <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Generation quota exhausted. Submit feedback to unlock more.",
-        )
+        _raise_quota_http_error(count=1, have=current_user.generation_quota)
 
     return current_user
 
@@ -231,11 +248,7 @@ def decrement_quota(db: Session, user: User, count: int = 1) -> None:
         except Exception:
             pass
         have = getattr(user, "generation_quota", None)
-        have_str = str(have) if isinstance(have, int) else "0"
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Not enough quota. Need {count}, have {have_str}. Submit feedback to unlock more.",
-        )
+        _raise_quota_http_error(count=count, have=have if isinstance(have, int) else 0)
     db.commit()
     try:
         db.refresh(user)
@@ -312,14 +325,7 @@ def open_quota_reservation(db: Session, user_id: int, count: int = 1) -> int | N
         db.rollback()
         user = db.query(User).filter(User.id == user_id).first()
         have = getattr(user, "generation_quota", 0)
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=(
-                "Generation quota exhausted. Submit feedback to unlock more."
-                if count == 1
-                else f"Not enough quota for this request (need {count}, have {have}). Submit feedback to unlock more."
-            ),
-        )
+        _raise_quota_http_error(count=count, have=have)
 
     reservation = QuotaReservation(
         user_id=user_id,
@@ -334,8 +340,50 @@ def open_quota_reservation(db: Session, user_id: int, count: int = 1) -> int | N
     return reservation_id
 
 
-def finalize_quota_reservation(db: Session, reservation_id: int) -> tuple[int, int]:
+def charge_quota_reservation(
+    db: Session,
+    reservation_id: int | None,
+    n: int = 1,
+    *,
+    commit: bool = True,
+) -> None:
+    """Persist a delivered-unit charge against an open reservation."""
+    settings = get_settings()
+    if settings.deploy_mode == "selfhost":
+        return
+    if reservation_id is None or n <= 0:
+        return
+
+    result = db.execute(
+        sa.update(QuotaReservation)
+        .where(
+            QuotaReservation.id == reservation_id,
+            QuotaReservation.released_at.is_(None),
+            QuotaReservation.charged_count + n <= QuotaReservation.reserved_count,
+        )
+        .values(
+            charged_count=QuotaReservation.charged_count + n,
+            updated_at=sa.func.now(),
+        )
+    )
+    if result.rowcount <= 0:
+        db.rollback()
+        raise RuntimeError("Failed to persist quota charge")
+
+    if commit:
+        db.commit()
+
+
+def finalize_quota_reservation(
+    db: Session,
+    reservation_id: int | None,
+    *,
+    commit: bool = True,
+) -> tuple[int, int]:
     """Close a durable reservation and refund any unused quota."""
+    if reservation_id is None:
+        return 0, 0
+
     reservation = (
         db.query(QuotaReservation)
         .filter(QuotaReservation.id == reservation_id)
@@ -356,8 +404,25 @@ def finalize_quota_reservation(db: Session, reservation_id: int) -> tuple[int, i
     released_at = datetime.now(timezone.utc)
     reservation.released_at = released_at
     reservation.updated_at = released_at
-    db.commit()
+    if commit:
+        db.commit()
     return charged, unused
+
+
+def settle_quota_reservation(
+    db: Session,
+    reservation_id: int | None,
+    *,
+    charge_count: int = 0,
+    commit: bool = True,
+) -> tuple[int, int]:
+    """Charge delivered units, then finalize the reservation."""
+    if reservation_id is None:
+        return 0, 0
+
+    if charge_count > 0:
+        charge_quota_reservation(db, reservation_id, n=charge_count, commit=False)
+    return finalize_quota_reservation(db, reservation_id, commit=commit)
 
 
 class QuotaScope:
@@ -398,27 +463,7 @@ class QuotaScope:
         if next_total > self.reserved:
             raise ValueError(f"Quota charge exceeds reservation: {next_total} > {self.reserved}")
 
-        if self.reservation_id is None:
-            self.charged = next_total
-            return
-
-        result = self.db.execute(
-            sa.update(QuotaReservation)
-            .where(
-                QuotaReservation.id == self.reservation_id,
-                QuotaReservation.released_at.is_(None),
-                QuotaReservation.charged_count + n <= QuotaReservation.reserved_count,
-            )
-            .values(
-                charged_count=QuotaReservation.charged_count + n,
-                updated_at=sa.func.now(),
-            )
-        )
-        if result.rowcount <= 0:
-            self.db.rollback()
-            raise RuntimeError("Failed to persist quota charge")
-
-        self.db.commit()
+        charge_quota_reservation(self.db, self.reservation_id, n=n, commit=True)
         self.charged = next_total
 
     def finalize(self) -> None:
@@ -427,7 +472,7 @@ class QuotaScope:
             return
 
         if self.reservation_id is not None:
-            charged, _unused = finalize_quota_reservation(self.db, self.reservation_id)
+            charged, _unused = finalize_quota_reservation(self.db, self.reservation_id, commit=True)
             self.charged = charged
 
         self.reservation_id = None
@@ -454,14 +499,9 @@ def reserve_quota(db: Session, user_id: int, count: int = 1) -> None:
 
     ok = try_decrement_quota(db, user_id=user_id, count=count)
     if not ok:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=(
-                "Generation quota exhausted. Submit feedback to unlock more."
-                if count == 1
-                else f"Not enough quota for this request (need {count}). Submit feedback to unlock more."
-            ),
-        )
+        user = db.query(User).filter(User.id == user_id).first()
+        have = getattr(user, "generation_quota", 0)
+        _raise_quota_http_error(count=count, have=have)
 
 
 def refund_quota(db: Session, user_id: int, count: int = 1) -> None:

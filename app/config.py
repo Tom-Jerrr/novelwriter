@@ -101,6 +101,15 @@ class Settings(BaseSettings):
     # Concurrency: max simultaneous LLM API calls (semaphore-based)
     max_concurrent_llm_calls: int = 50
 
+    # Copilot admission control
+    copilot_max_runs_per_session: int = 1
+    copilot_max_runs_per_user: int = 2
+    copilot_max_runs_global: int = 10
+    copilot_max_tool_rounds: int = 8
+    copilot_run_queue_timeout_seconds: int = 30
+    copilot_run_lease_seconds: int = 300
+    copilot_run_stale_timeout_seconds: int = 300
+
     # Event tracking (product analytics). Selfhost: off by default. Hosted: enable via env.
     enable_event_tracking: bool = False
 

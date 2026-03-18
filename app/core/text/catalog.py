@@ -15,7 +15,9 @@ from __future__ import annotations
 
 from enum import Enum
 
-DEFAULT_LOCALE = "zh"
+from app.language import DEFAULT_LANGUAGE, get_language_fallback_chain
+
+DEFAULT_LOCALE = DEFAULT_LANGUAGE
 
 # ---------------------------------------------------------------------------
 # Prompt keys — one per template slot
@@ -28,6 +30,7 @@ class PromptKey(str, Enum):
     OUTLINE = "outline"
     WORLD_GEN_SYSTEM = "world_gen_system"
     WORLD_GEN = "world_gen"
+    BOOTSTRAP_REFINEMENT = "bootstrap_refinement"
 
 
 # ---------------------------------------------------------------------------
@@ -71,18 +74,11 @@ def get_prompt(
 
     Raises ``KeyError`` if no template is found.
     """
-    effective = locale or DEFAULT_LOCALE
-
-    catalog = _catalogs.get(effective)
-    if catalog and key in catalog:
-        return catalog[key]
-
-    # Fallback to default locale when the requested one is incomplete.
-    if effective != DEFAULT_LOCALE:
-        catalog = _catalogs.get(DEFAULT_LOCALE)
+    for candidate in get_language_fallback_chain(locale, default=DEFAULT_LOCALE):
+        catalog = _catalogs.get(candidate)
         if catalog and key in catalog:
             return catalog[key]
 
     raise KeyError(
-        f"No template for {key!r} (locale={effective!r})"
+        f"No template for {key!r} (locale={locale or DEFAULT_LOCALE!r})"
     )

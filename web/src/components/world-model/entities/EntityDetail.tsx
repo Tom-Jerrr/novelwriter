@@ -10,6 +10,10 @@ import { GlassSurface } from '@/components/ui/glass-surface'
 import { useWorldEntity, useUpdateEntity, useDeleteEntity, useCreateAttribute, useReorderAttributes } from '@/hooks/world/useEntities'
 import { LABELS } from '@/constants/labels'
 import type { WorldEntityAttribute } from '@/types/api'
+import type { CopilotContextStage } from '@/types/copilot'
+import { useNovelCopilot } from '@/components/novel-copilot/NovelCopilotContext'
+import { buildCurrentEntityCopilotLaunchArgs } from '@/components/novel-copilot/novelCopilotLauncher'
+import { Sparkles } from 'lucide-react'
 
 function SortableAttributeRow({ novelId, entityId, attribute }: {
   novelId: number
@@ -26,10 +30,13 @@ function SortableAttributeRow({ novelId, entityId, attribute }: {
 
 const COMMON_TYPES = ['Character', 'Location', 'Faction', 'Concept', 'Vehicle', 'Item']
 
-export function EntityDetail({ novelId, entityId, onDeleted }: {
+export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true, copilotSurface, copilotStage }: {
   novelId: number
   entityId: number | null
   onDeleted?: () => void
+  allowDelete?: boolean
+  copilotSurface?: 'studio' | 'atlas'
+  copilotStage?: CopilotContextStage
 }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showTypeDropdown, setShowTypeDropdown] = useState(false)
@@ -42,6 +49,7 @@ export function EntityDetail({ novelId, entityId, onDeleted }: {
   const deleteEntity = useDeleteEntity(novelId)
   const createAttr = useCreateAttribute(novelId, entityId ?? 0)
   const reorderAttrs = useReorderAttributes(novelId, entityId ?? 0)
+  const copilot = useNovelCopilot()
 
   if (!entityId || !entity) {
     return (
@@ -102,7 +110,7 @@ export function EntityDetail({ novelId, entityId, onDeleted }: {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto" data-testid="entity-detail">
+    <div className="flex-1 min-h-0 h-full overflow-y-auto" data-testid="entity-detail">
       <div className="max-w-5xl mx-auto px-8 py-8">
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
@@ -152,29 +160,43 @@ export function EntityDetail({ novelId, entityId, onDeleted }: {
               <span className={cn('text-xs', entity.status === 'confirmed' ? 'text-[hsl(var(--color-status-confirmed))]' : 'text-[hsl(var(--color-status-draft))]')}>
                 {entity.status === 'confirmed' ? '✓' : '●'} {entity.status}
               </span>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded-full border border-[hsl(var(--foreground)/0.10)] bg-[hsl(var(--foreground)/0.05)] px-2 py-0.5 text-[10px] text-foreground/76 transition-colors hover:bg-[hsl(var(--foreground)/0.08)] hover:text-foreground"
+                onClick={() => copilot.openDrawer(...buildCurrentEntityCopilotLaunchArgs({
+                  entityId,
+                  entityName: entity.name,
+                  surface: copilotSurface,
+                  stage: copilotStage,
+                }))}
+              >
+                <Sparkles className="h-3 w-3" /> AI 补完
+              </button>
             </div>
           </div>
           {/* Menu */}
-          <div className="relative">
-            <button className="text-muted-foreground hover:text-foreground px-2 py-1" onClick={() => setShowMenu(!showMenu)}>···</button>
-            {showMenu && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
-                <GlassSurface
-                  variant="floating"
-                  className="absolute right-0 top-full mt-1 z-20 rounded-xl py-1 min-w-[140px]"
-                >
-                  <button
-                    className="block w-full text-left px-3 py-2 text-sm text-[hsl(var(--color-danger))] hover:bg-[var(--nw-glass-bg-hover)]"
-                    onClick={() => { setShowMenu(false); setShowDeleteConfirm(true) }}
-                    data-testid="entity-delete-menu"
+          {allowDelete ? (
+            <div className="relative">
+              <button className="text-muted-foreground hover:text-foreground px-2 py-1" onClick={() => setShowMenu(!showMenu)}>···</button>
+              {showMenu && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
+                  <GlassSurface
+                    variant="floating"
+                    className="absolute right-0 top-full mt-1 z-20 rounded-xl py-1 min-w-[140px]"
                   >
-                    {LABELS.ENTITY_DELETE}
-                  </button>
-                </GlassSurface>
-              </>
-            )}
-          </div>
+                    <button
+                      className="block w-full text-left px-3 py-2 text-sm text-[hsl(var(--color-danger))] hover:bg-[var(--nw-glass-bg-hover)]"
+                      onClick={() => { setShowMenu(false); setShowDeleteConfirm(true) }}
+                      data-testid="entity-delete-menu"
+                    >
+                      {LABELS.ENTITY_DELETE}
+                    </button>
+                  </GlassSurface>
+                </>
+              )}
+            </div>
+          ) : null}
         </div>
 
         {/* Description */}
@@ -280,7 +302,7 @@ export function EntityDetail({ novelId, entityId, onDeleted }: {
       </div>
 
       <ConfirmDialog
-        open={showDeleteConfirm}
+        open={allowDelete && showDeleteConfirm}
         title={LABELS.ENTITY_DELETE}
         description={LABELS.ENTITY_DELETE_CONFIRM}
         tone="destructive"

@@ -14,6 +14,8 @@ export function RelationshipInspector({
   onUpdate,
   onConfirm,
   onDelete,
+  allowDelete = true,
+  layout = 'compact',
   className,
 }: {
   rel: WorldRelationship | null
@@ -21,6 +23,8 @@ export function RelationshipInspector({
   onUpdate: (relId: number, data: UpdateRelationshipRequest) => void
   onConfirm: (relId: number) => void
   onDelete: (relId: number) => void
+  allowDelete?: boolean
+  layout?: 'compact' | 'full'
   className?: string
 }) {
   const [pendingDeleteRelId, setPendingDeleteRelId] = useState<number | null>(null)
@@ -33,8 +37,12 @@ export function RelationshipInspector({
     <>
       <div
         className={cn(
-          'h-[160px] shrink-0 flex items-start gap-6 px-8 py-5',
-          'border-t border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] backdrop-blur-2xl',
+          layout === 'full'
+            ? 'flex h-full min-h-0 items-start gap-6 overflow-y-auto px-8 py-6'
+            : 'h-[160px] shrink-0 flex items-start gap-6 px-8 py-5',
+          layout === 'full'
+            ? 'bg-[var(--nw-glass-bg)] backdrop-blur-2xl'
+            : 'border-t border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] backdrop-blur-2xl',
           className,
         )}
         data-testid="relationship-inspector"
@@ -104,7 +112,7 @@ export function RelationshipInspector({
               {LABELS.CONFIRM}
             </Button>
           ) : null}
-          {rel ? (
+          {rel && allowDelete ? (
             <Button
               size="sm"
               variant="outline"
@@ -120,7 +128,7 @@ export function RelationshipInspector({
       </div>
 
       <ConfirmDialog
-        open={pendingDeleteRelId != null && pendingDeleteRelId === rel?.id}
+        open={allowDelete && pendingDeleteRelId != null && pendingDeleteRelId === rel?.id}
         title={LABELS.REL_DELETE}
         description={LABELS.REL_DELETE_CONFIRM}
         confirmText={LABELS.CONFIRM}

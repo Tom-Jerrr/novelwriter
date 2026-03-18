@@ -39,6 +39,8 @@ export function VisibilityDot({ visibility, onChange, className }: {
       data-visibility={visibility}
       onClick={e => { e.stopPropagation(); onChange(next) }}
       onPointerDown={e => e.stopPropagation()}
+      onKeyDown={e => e.stopPropagation()}
+      onKeyUp={e => e.stopPropagation()}
       aria-label={`Visibility: ${label}. Click to set ${nextLabel}.`}
       title={`Visibility: ${label}`}
     >

@@ -30,115 +30,20 @@ import type {
   WorldpackImportResponse,
   WorldpackV1,
 } from '@/types/api'
-import { getLlmConfig } from '@/lib/llmConfigStore'
-
-// NOTE: use nullish coalescing so `VITE_API_URL=""` stays empty (same-origin in Docker).
-const BASE_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/+$/, '')
-const NON_RETRIABLE_503_CODES = new Set([
-  'ai_manually_disabled',
-  'ai_budget_hard_stop',
-  'ai_budget_meter_disabled',
-  'ai_budget_meter_unavailable',
-])
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function llmHeaders(): HeadersInit {
-  const headers: Record<string, string> = {}
-  const { baseUrl, apiKey, model } = getLlmConfig()
-  if (baseUrl) headers['X-LLM-Base-Url'] = baseUrl
-  if (apiKey) headers['X-LLM-Api-Key'] = apiKey
-  if (model) headers['X-LLM-Model'] = model
-  return headers
-}
-
-export class ApiError extends Error {
-  public detail: unknown
-  public code?: string
-  public requestId?: string
-
-  constructor(
-    public status: number,
-    message: string,
-    opts?: { detail?: unknown; code?: string; requestId?: string },
-  ) {
-    super(message)
-    this.name = 'ApiError'
-    this.detail = opts?.detail
-    this.code = opts?.code
-    this.requestId = opts?.requestId
-  }
-}
-
-async function parseErrorDetail(res: Response): Promise<{ detail: unknown; code?: string; requestId?: string }> {
-  const requestId = res.headers.get('x-request-id') ?? res.headers.get('X-Request-ID') ?? undefined
-  const text = await res.text()
-  if (!text) return { detail: undefined, requestId }
-
-  const contentType = res.headers.get('content-type') || ''
-  const looksJson = contentType.includes('application/json') || text.trim().startsWith('{') || text.trim().startsWith('[')
-
-  let body: unknown = text
-  if (looksJson) {
-    try {
-      body = JSON.parse(text) as unknown
-    } catch {
-      body = text
-    }
-  }
-
-  const detail = isRecord(body) && 'detail' in body ? (body as { detail?: unknown }).detail : body
-  const code = isRecord(detail) && typeof detail.code === 'string' ? detail.code : undefined
-  return { detail, code, requestId }
-}
-
-async function throwApiError(res: Response): Promise<never> {
-  const { detail, code, requestId } = await parseErrorDetail(res)
-  // Intentionally keep message generic; UI should map (status/code) to user-facing copy.
-  throw new ApiError(res.status, `HTTP ${res.status}`, { detail, code, requestId })
-}
-
-function createApiError(
-  status: number,
-  parsed: { detail: unknown; code?: string; requestId?: string },
-): ApiError {
-  return new ApiError(status, `HTTP ${status}`, parsed)
-}
-
-function parseRetryAfterSeconds(res: Response): number {
-  const raw = parseInt(res.headers.get('Retry-After') ?? '3', 10)
-  if (!Number.isFinite(raw) || raw <= 0) return 3
-  return raw
-}
-
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const maxRetries = 2
-  for (let attempt = 0; ; attempt++) {
-    const res = await fetch(`${BASE_URL}${path}`, {
-      ...init,
-      credentials: init?.credentials ?? 'include',
-      // Only attach LLM BYOK headers on endpoints that actually need them.
-      // This reduces accidental secret exposure via unrelated API calls / proxies / logs.
-      headers: { 'Content-Type': 'application/json', ...init?.headers },
-    })
-    if (res.status === 503 && attempt < maxRetries) {
-      const parsed = await parseErrorDetail(res)
-      if (parsed.code && NON_RETRIABLE_503_CODES.has(parsed.code)) {
-        throw createApiError(res.status, parsed)
-      }
-      const retryAfter = parseRetryAfterSeconds(res)
-      await new Promise(r => setTimeout(r, retryAfter * 1000))
-      continue
-    }
-    if (!res.ok) await throwApiError(res)
-    if (res.status === 204 || res.headers.get('content-length') === '0') return undefined as T
-    const text = await res.text()
-    if (!text) return undefined as T
-    return JSON.parse(text) as T
-  }
-}
+import {
+  ApiError,
+  BASE_URL,
+  authFetch,
+  createApiError,
+  fetchJson,
+  isNonRetriable503Code,
+  llmHeaders,
+  parseErrorDetail,
+  parseRetryAfterSeconds,
+  request,
+  throwApiError,
+} from './apiClient'
+import { copilotApi } from './copilotApi'
 
 const listNovels = () => request<Novel[]>('/api/novels')
 const listChapters = (novelId: number) => request<Chapter[]>(`/api/novels/${novelId}/chapters`)
@@ -270,7 +175,7 @@ export async function* streamContinuation(
     })
     if (resp.status === 503 && attempt < maxRetries) {
       const parsed = await parseErrorDetail(resp)
-      if (parsed.code && NON_RETRIABLE_503_CODES.has(parsed.code)) {
+      if (isNonRetriable503Code(parsed.code)) {
         throw createApiError(resp.status, parsed)
       }
       const retryAfter = parseRetryAfterSeconds(resp)
@@ -308,26 +213,7 @@ export async function* streamContinuation(
   if (tail) yield parseLine(tail)
 }
 
-async function authFetch<T>(url: string): Promise<T> {
-  const res = await fetch(url, { credentials: 'include' })
-  if (!res.ok) await throwApiError(res)
-  if (res.status === 204 || res.headers.get('content-length') === '0') return undefined as T
-  return res.json()
-}
-
-async function fetchJson<T>(url: string, method: string, body?: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method,
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  })
-  if (!res.ok) await throwApiError(res)
-  if (res.status === 204 || res.headers.get('content-length') === '0') return undefined as T
-  return res.json()
-}
-
-export { llmHeaders }
+export { ApiError, copilotApi, llmHeaders }
 
 export const worldApi = {
   // World generation

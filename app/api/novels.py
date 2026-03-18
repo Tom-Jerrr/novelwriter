@@ -35,7 +35,7 @@ from app.schemas import (
     ContinueResponse,
     UploadResponse,
 )
-from app.core.parser import parse_novel_file
+from app.core.parser import parse_novel_file, read_novel_file_text
 from app.core.llm_request import get_llm_config
 from app.core.context_assembly import apply_writer_context_budget, assemble_writer_context
 from app.core.continuation_postcheck import postcheck_continuation
@@ -55,6 +55,8 @@ from app.core.auth import (
 )
 from app.core.llm_semaphore import acquire_llm_slot, release_llm_slot
 from app.core.events import record_event
+from app.language import DEFAULT_LANGUAGE, normalize_language_code
+from app.language_policy import resolve_text_processing_language
 from app.models import User
 
 router = APIRouter(prefix="/api/novels", tags=["novels"])
@@ -118,6 +120,19 @@ def _safe_delete_where(
             return
 
         raise
+
+
+def _resolve_upload_language(file_path: Path, *, requested_language: str | None) -> str:
+    normalized_language = normalize_language_code(requested_language, default=None)
+    if normalized_language:
+        return normalized_language
+
+    novel_text = read_novel_file_text(str(file_path))
+    return resolve_text_processing_language(
+        None,
+        sample_text=novel_text,
+        default=DEFAULT_LANGUAGE,
+    )
 
 
 def _user_novels(db: Session, user: User):
@@ -207,6 +222,7 @@ class _ContinuationContext:
     debug_summary: ContinueDebugSummary
     writer_ctx: dict[str, Any]
     effective_context_chapters: int
+    novel_language: str | None = None
 
 
 def _prepare_continuation_context(
@@ -237,8 +253,10 @@ def _prepare_continuation_context(
     if not recent_chapters:
         raise HTTPException(status_code=400, detail="Novel has no chapters")
 
-    recent_text = format_recent_chapters_for_prompt(recent_chapters)
-    relevance_text = append_user_instruction_for_relevance(recent_text, req.prompt)
+    novel_language = getattr(novel, "language", None)
+
+    recent_text = format_recent_chapters_for_prompt(recent_chapters, locale=novel_language)
+    relevance_text = append_user_instruction_for_relevance(recent_text, req.prompt, locale=novel_language)
 
     try:
         writer_ctx = assemble_writer_context(db, novel_id, chapter_text=relevance_text)
@@ -247,7 +265,7 @@ def _prepare_continuation_context(
         logger.exception("assemble_writer_context failed for novel %s", novel_id)
         raise HTTPException(status_code=500, detail="Context assembly failed")
 
-    world_context = format_world_context_for_prompt(writer_ctx)
+    world_context = format_world_context_for_prompt(writer_ctx, locale=novel_language)
     narrative_constraints = extract_narrative_constraints(writer_ctx)
     debug_summary = _build_continue_debug_summary(writer_ctx, context_chapters=effective_context_chapters)
 
@@ -258,6 +276,7 @@ def _prepare_continuation_context(
         debug_summary=debug_summary,
         writer_ctx=writer_ctx,
         effective_context_chapters=effective_context_chapters,
+        novel_language=novel_language,
     )
 
 
@@ -266,6 +285,7 @@ async def upload_novel(
     file: UploadFile = File(...),
     title: str = Form(...),
     author: str = Form(""),
+    language: str | None = Form(None),
     consent_acknowledged: bool = Form(False),
     consent_version: str = Form(""),
     db: Session = Depends(get_db),
@@ -331,7 +351,8 @@ async def upload_novel(
             pass
 
     try:
-        chapters = parse_novel_file(str(file_path))
+        normalized_language = _resolve_upload_language(file_path, requested_language=language)
+        chapters = parse_novel_file(str(file_path), language=normalized_language)
     except Exception as e:
         file_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=f"Failed to parse novel: {str(e)}")
@@ -340,6 +361,7 @@ async def upload_novel(
     novel = Novel(
         title=title,
         author=author,
+        language=normalized_language,
         file_path=str(file_path),
         total_chapters=len(chapters),
         owner_id=current_user.id,
@@ -365,7 +387,12 @@ async def upload_novel(
         current_user.id,
         "novel_upload",
         novel_id=novel.id,
-        meta={"chapters": len(chapters), "consent_acknowledged": True, "consent_version": consent_version},
+        meta={
+            "chapters": len(chapters),
+            "consent_acknowledged": True,
+            "consent_version": consent_version,
+            "language": novel.language,
+        },
     )
 
     return UploadResponse(
@@ -679,6 +706,7 @@ async def continue_novel_endpoint(
         recent_text=ctx.recent_text,
         user_prompt=req.prompt,
         continuations=continuations,
+        novel_language=ctx.novel_language,
     )
     if postcheck_warnings:
         ctx.debug_summary = ctx.debug_summary.model_copy(
@@ -776,6 +804,7 @@ async def continue_novel_stream_endpoint(
                             recent_text=ctx.recent_text,
                             user_prompt=req.prompt,
                             continuations=conts,
+                            novel_language=ctx.novel_language,
                         )
                         if postcheck_warnings:
                             debug_with_warnings = ctx.debug_summary.model_copy(

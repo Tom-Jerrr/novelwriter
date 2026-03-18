@@ -15,16 +15,34 @@ def test_format_recent_chapters_for_prompt_preserves_existing_shape():
 
     result = format_recent_chapters_for_prompt(chapters)
 
-    assert "【Chapter 1: 第一章】" in result
+    # Default locale is zh
+    assert "【第1章：第一章】" in result
     assert "云澈看向远方。" in result
-    assert "【Chapter 2: 第二章】" in result
+    assert "【第2章：第二章】" in result
     assert "楚月仙静坐不语。" in result
+
+
+def test_format_recent_chapters_en_locale():
+    chapters = [
+        SimpleNamespace(chapter_number=1, title="Dawn", content="The sun rose."),
+    ]
+    result = format_recent_chapters_for_prompt(chapters, locale="en")
+    assert "【Chapter 1: Dawn】" in result
+    assert "The sun rose." in result
 
 
 def test_append_user_instruction_for_relevance_uses_dedicated_heading():
     result = append_user_instruction_for_relevance("recent text", "请继续写云澈的内心戏")
 
     assert result.endswith("【用户续写指令】\n请继续写云澈的内心戏")
+
+
+def test_append_user_instruction_en_locale():
+    result = append_user_instruction_for_relevance(
+        "recent text", "Continue the inner monologue", locale="en",
+    )
+    assert "【User Instruction】" in result
+    assert "Continue the inner monologue" in result
 
 
 def test_format_world_context_for_prompt_renders_sections_without_constraints_inline():
@@ -77,6 +95,26 @@ def test_format_world_context_for_prompt_renders_sections_without_constraints_in
     assert "身份：苍风弟子" in result
     assert "云澈 —师徒→ 楚月仙：云澈拜楚月仙为师" in result
     assert "每章最多一次时间跳转" not in result
+
+
+def test_format_world_context_en_locale():
+    writer_ctx = {
+        "systems": [],
+        "entities": [
+            {
+                "id": 1,
+                "name": "John",
+                "entity_type": "Character",
+                "description": "Hero",
+                "aliases": ["Johnny"],
+                "attributes": [],
+            },
+        ],
+        "relationships": [],
+    }
+    result = format_world_context_for_prompt(writer_ctx, locale="en")
+    assert "〈Characters & Entities〉" in result
+    assert "Aliases: Johnny" in result
 
 
 def test_format_world_context_for_prompt_renders_timeline_time_field():

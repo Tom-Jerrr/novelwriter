@@ -17,6 +17,7 @@ from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, get_db
+from app.core.text import PromptKey
 from app.models import (
     Chapter,
     Continuation,
@@ -426,3 +427,36 @@ class TestTemperaturePassthrough:
             json={"num_versions": 1, "temperature": 2.1},
         )
         assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_build_continuation_prompt_uses_novel_language_for_prompt_locale(db, novel, monkeypatch):
+    from app.core import generator as generator_mod
+
+    novel.language = "en-US"
+    db.commit()
+
+    seen_locales: list[tuple[PromptKey, str | None]] = []
+
+    def fake_get_prompt(key: PromptKey, *, locale: str | None = None, provider: str | None = None) -> str:
+        del provider
+        seen_locales.append((key, locale))
+        if key == PromptKey.SYSTEM:
+            return "system prompt"
+        if key == PromptKey.CONTINUATION:
+            return "title={title}\nnext={next_chapter}\noutline={outline}\n{world_context}\n{narrative_constraints}"
+        raise AssertionError(f"unexpected key: {key}")
+
+    monkeypatch.setattr(generator_mod, "get_prompt", fake_get_prompt)
+
+    _prompt, _max_tokens, build_info = await generator_mod._build_continuation_prompt(
+        db,
+        novel.id,
+        use_core_memory=False,
+        use_lorebook=False,
+        context_chapters=2,
+    )
+
+    assert (PromptKey.CONTINUATION, "en-us") in seen_locales
+    assert (PromptKey.SYSTEM, "en-us") in seen_locales
+    assert build_info["system_prompt"].startswith("system prompt")

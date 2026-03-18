@@ -1,0 +1,501 @@
+# SPDX-FileCopyrightText: 2026 Isaac.X.Ω.Yuan
+# SPDX-License-Identifier: AGPL-3.0-only
+
+"""Scope loading and backend-sourced evidence helpers for copilot."""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+from sqlalchemy.orm import Session
+
+from app.models import (
+    Chapter,
+    Novel,
+    WorldEntity,
+    WorldEntityAttribute,
+    WorldRelationship,
+    WorldSystem,
+)
+
+logger = logging.getLogger(__name__)
+
+CopilotRuntimeProfile = Literal["focused_research", "draft_governance", "broad_exploration"]
+CopilotFocusVariant = Literal["entity", "relationship", "draft", "whole_book"]
+
+MAX_EVIDENCE_ITEMS = 15
+MAX_SCOPE_ENTITIES = 80
+MAX_SCOPE_RELATIONSHIPS = 60
+MAX_SCOPE_SYSTEMS = 30
+MAX_CHAPTER_EXCERPT_CHARS = 2000
+
+
+@dataclass
+class ScopeSnapshot:
+    """World-model state loaded by the backend for a copilot scope."""
+
+    novel: Novel
+    novel_language: str
+    entities: list[WorldEntity]
+    entities_by_id: dict[int, WorldEntity]
+    relationships: list[WorldRelationship]
+    systems: list[WorldSystem]
+    attributes_by_entity: dict[int, list[WorldEntityAttribute]]
+    draft_entities: list[WorldEntity]
+    draft_relationships: list[WorldRelationship]
+    draft_systems: list[WorldSystem]
+    profile: str = "broad_exploration"
+    focus_variant: str = "whole_book"
+    focus_entity_id: int | None = None
+
+
+@dataclass
+class EvidenceItem:
+    """A backend-sourced, verifiable evidence item."""
+
+    evidence_id: str
+    source_type: str
+    source_ref: dict[str, Any]
+    title: str
+    excerpt: str
+    why_relevant: str
+    pack_id: str | None = None
+    source_refs: list[dict[str, Any]] = field(default_factory=list)
+    anchor_terms: list[str] = field(default_factory=list)
+    support_count: int | None = None
+    preview_excerpt: str | None = None
+    expanded: bool = False
+
+
+def derive_runtime_profile(mode: str, scope: str, context: dict | None) -> CopilotRuntimeProfile:
+    """Derive the bounded runtime profile used for isolation and preload policy."""
+    if mode == "draft_cleanup":
+        return "draft_governance"
+    if scope == "whole_book":
+        return "broad_exploration"
+    return "focused_research"
+
+
+def derive_focus_variant(mode: str, scope: str, context: dict | None) -> CopilotFocusVariant:
+    """Derive the detailed workbench focus within the runtime profile."""
+    if mode == "draft_cleanup":
+        return "draft"
+    if scope == "whole_book":
+        return "whole_book"
+    if context and context.get("tab") == "relationships":
+        return "relationship"
+    return "entity"
+
+
+def _load_attributes_for_entities(
+    db: Session,
+    entity_ids: list[int],
+) -> dict[int, list[WorldEntityAttribute]]:
+    if not entity_ids:
+        return {}
+
+    attrs = (
+        db.query(WorldEntityAttribute)
+        .filter(WorldEntityAttribute.entity_id.in_(entity_ids))
+        .order_by(WorldEntityAttribute.sort_order)
+        .all()
+    )
+    attrs_by_entity: dict[int, list[WorldEntityAttribute]] = {}
+    for attr in attrs:
+        attrs_by_entity.setdefault(attr.entity_id, []).append(attr)
+    return attrs_by_entity
+
+
+def _build_scope_snapshot(
+    *,
+    novel: Novel,
+    profile: CopilotRuntimeProfile,
+    focus_variant: CopilotFocusVariant,
+    focus_entity_id: int | None,
+    entities: list[WorldEntity],
+    relationships: list[WorldRelationship],
+    systems: list[WorldSystem],
+    attributes_by_entity: dict[int, list[WorldEntityAttribute]],
+) -> ScopeSnapshot:
+    entities_by_id = {entity.id: entity for entity in entities}
+    return ScopeSnapshot(
+        novel=novel,
+        novel_language=novel.language or "zh",
+        entities=entities,
+        entities_by_id=entities_by_id,
+        relationships=relationships,
+        systems=systems,
+        attributes_by_entity=attributes_by_entity,
+        draft_entities=[entity for entity in entities if entity.status == "draft"],
+        draft_relationships=[relationship for relationship in relationships if relationship.status == "draft"],
+        draft_systems=[system for system in systems if system.status == "draft"],
+        profile=profile,
+        focus_variant=focus_variant,
+        focus_entity_id=focus_entity_id,
+    )
+
+
+def _load_broad_exploration_snapshot(
+    db: Session,
+    novel: Novel,
+    *,
+    focus_variant: CopilotFocusVariant,
+) -> ScopeSnapshot:
+    novel_id = novel.id
+    entities = (
+        db.query(WorldEntity)
+        .filter(WorldEntity.novel_id == novel_id)
+        .limit(MAX_SCOPE_ENTITIES)
+        .all()
+    )
+    relationships = (
+        db.query(WorldRelationship)
+        .filter(WorldRelationship.novel_id == novel_id)
+        .limit(MAX_SCOPE_RELATIONSHIPS)
+        .all()
+    )
+    systems = (
+        db.query(WorldSystem)
+        .filter(WorldSystem.novel_id == novel_id)
+        .limit(MAX_SCOPE_SYSTEMS)
+        .all()
+    )
+    attributes_by_entity = _load_attributes_for_entities(db, [entity.id for entity in entities])
+    return _build_scope_snapshot(
+        novel=novel,
+        profile="broad_exploration",
+        focus_variant=focus_variant,
+        focus_entity_id=None,
+        entities=entities,
+        relationships=relationships,
+        systems=systems,
+        attributes_by_entity=attributes_by_entity,
+    )
+
+
+def _load_focused_research_snapshot(
+    db: Session,
+    novel: Novel,
+    *,
+    focus_variant: CopilotFocusVariant,
+    focus_entity_id: int | None,
+) -> ScopeSnapshot:
+    novel_id = novel.id
+    entity_query = db.query(WorldEntity).filter(WorldEntity.novel_id == novel_id)
+    relationship_query = db.query(WorldRelationship).filter(WorldRelationship.novel_id == novel_id)
+
+    if focus_entity_id is not None:
+        relationships = relationship_query.filter(
+            (WorldRelationship.source_id == focus_entity_id)
+            | (WorldRelationship.target_id == focus_entity_id),
+        ).limit(MAX_SCOPE_RELATIONSHIPS).all()
+
+        entity_ids = {focus_entity_id}
+        for relationship in relationships:
+            entity_ids.add(relationship.source_id)
+            entity_ids.add(relationship.target_id)
+
+        entities = (
+            entity_query
+            .filter(WorldEntity.id.in_(entity_ids))
+            .limit(MAX_SCOPE_ENTITIES)
+            .all()
+        )
+    else:
+        entities = entity_query.limit(min(MAX_SCOPE_ENTITIES, 16)).all()
+        entity_ids = {entity.id for entity in entities}
+        if entity_ids:
+            relationships = relationship_query.filter(
+                (WorldRelationship.source_id.in_(entity_ids))
+                | (WorldRelationship.target_id.in_(entity_ids)),
+            ).limit(min(MAX_SCOPE_RELATIONSHIPS, 20)).all()
+        else:
+            relationships = []
+
+    attributes_by_entity = _load_attributes_for_entities(db, [entity.id for entity in entities])
+    return _build_scope_snapshot(
+        novel=novel,
+        profile="focused_research",
+        focus_variant=focus_variant,
+        focus_entity_id=focus_entity_id,
+        entities=entities,
+        relationships=relationships,
+        systems=[],
+        attributes_by_entity=attributes_by_entity,
+    )
+
+
+def _load_draft_governance_snapshot(db: Session, novel: Novel) -> ScopeSnapshot:
+    novel_id = novel.id
+    draft_entities = (
+        db.query(WorldEntity)
+        .filter(WorldEntity.novel_id == novel_id, WorldEntity.status == "draft")
+        .limit(MAX_SCOPE_ENTITIES)
+        .all()
+    )
+    draft_relationships = (
+        db.query(WorldRelationship)
+        .filter(WorldRelationship.novel_id == novel_id, WorldRelationship.status == "draft")
+        .limit(MAX_SCOPE_RELATIONSHIPS)
+        .all()
+    )
+    draft_systems = (
+        db.query(WorldSystem)
+        .filter(WorldSystem.novel_id == novel_id, WorldSystem.status == "draft")
+        .limit(MAX_SCOPE_SYSTEMS)
+        .all()
+    )
+
+    entity_ids = {entity.id for entity in draft_entities}
+    for relationship in draft_relationships:
+        entity_ids.add(relationship.source_id)
+        entity_ids.add(relationship.target_id)
+
+    entities = (
+        db.query(WorldEntity)
+        .filter(WorldEntity.novel_id == novel_id, WorldEntity.id.in_(entity_ids))
+        .all()
+        if entity_ids
+        else []
+    )
+    attributes_by_entity = _load_attributes_for_entities(db, [entity.id for entity in entities])
+    return _build_scope_snapshot(
+        novel=novel,
+        profile="draft_governance",
+        focus_variant="draft",
+        focus_entity_id=None,
+        entities=entities,
+        relationships=draft_relationships,
+        systems=draft_systems,
+        attributes_by_entity=attributes_by_entity,
+    )
+
+
+def load_scope_snapshot(db: Session, novel: Novel, mode: str, scope: str, context: dict | None) -> ScopeSnapshot:
+    """Load world-model state relevant to the current copilot scope."""
+    profile = derive_runtime_profile(mode, scope, context)
+    focus_variant = derive_focus_variant(mode, scope, context)
+    focus_entity_id = (context or {}).get("entity_id")
+    if not isinstance(focus_entity_id, int):
+        focus_entity_id = None
+
+    if profile == "draft_governance":
+        return _load_draft_governance_snapshot(db, novel)
+    if profile == "focused_research":
+        return _load_focused_research_snapshot(
+            db,
+            novel,
+            focus_variant=focus_variant,
+            focus_entity_id=focus_entity_id,
+        )
+    return _load_broad_exploration_snapshot(db, novel, focus_variant=focus_variant)
+
+
+def gather_evidence(db: Session, novel: Novel, snapshot: ScopeSnapshot, context: dict | None) -> list[EvidenceItem]:
+    """Gather evidence from backend-known sources BEFORE the LLM call."""
+    items: list[EvidenceItem] = []
+
+    if snapshot.profile == "draft_governance":
+        _gather_draft_row_evidence(snapshot, items)
+        if snapshot.focus_entity_id is not None:
+            _gather_chapter_evidence(db, novel, context, snapshot, items)
+    else:
+        _gather_chapter_evidence(db, novel, context, snapshot, items)
+        _gather_entity_evidence(snapshot, context, items)
+        _gather_relationship_evidence(snapshot, context, items)
+
+    return items[:MAX_EVIDENCE_ITEMS]
+
+
+def _gather_chapter_evidence(
+    db: Session,
+    novel: Novel,
+    context: dict | None,
+    snapshot: ScopeSnapshot,
+    items: list[EvidenceItem],
+) -> None:
+    """Gather chapter excerpts from window index or tail chapters."""
+    from app.core.indexing.window_index import NovelIndex
+
+    if context and context.get("entity_id") and novel.window_index:
+        entity = snapshot.entities_by_id.get(context["entity_id"])
+        if entity:
+            try:
+                index = NovelIndex.from_msgpack(novel.window_index)
+                windows = index.find_entity_passages(entity.name, limit=6)
+                for window in windows:
+                    chapter = db.get(Chapter, window.chapter_id)
+                    if chapter and chapter.content:
+                        start = max(0, window.start_pos)
+                        end = min(len(chapter.content), window.end_pos)
+                        text = chapter.content[start:end]
+                        if text.strip():
+                            items.append(EvidenceItem(
+                                evidence_id=f"ch_{chapter.id}_{start}",
+                                source_type="chapter_excerpt",
+                                source_ref={
+                                    "chapter_id": chapter.id,
+                                    "chapter_number": chapter.chapter_number,
+                                    "start_pos": start,
+                                    "end_pos": end,
+                                },
+                                title=f"第{chapter.chapter_number}章 · 位置{start}-{end}",
+                                excerpt=text[:MAX_CHAPTER_EXCERPT_CHARS],
+                                why_relevant=f"包含对「{entity.name}」的提及",
+                            ))
+            except Exception:
+                logger.debug("Window index load failed, falling back to tail chapters", exc_info=True)
+
+    if len(items) < 3 and snapshot.focus_variant != "whole_book":
+        chapters = (
+            db.query(Chapter)
+            .filter(Chapter.novel_id == novel.id)
+            .order_by(Chapter.chapter_number.desc())
+            .limit(3)
+            .all()
+        )
+        seen_ch_ids = {item.source_ref.get("chapter_id") for item in items if item.source_type == "chapter_excerpt"}
+        for chapter in chapters:
+            if chapter.id in seen_ch_ids or not chapter.content or not chapter.content.strip():
+                continue
+            text = (
+                chapter.content[-MAX_CHAPTER_EXCERPT_CHARS:]
+                if len(chapter.content) > MAX_CHAPTER_EXCERPT_CHARS
+                else chapter.content
+            )
+            items.append(EvidenceItem(
+                evidence_id=f"ch_{chapter.id}_tail",
+                source_type="chapter_excerpt",
+                source_ref={
+                    "chapter_id": chapter.id,
+                    "chapter_number": chapter.chapter_number,
+                    "start_pos": max(0, len(chapter.content) - MAX_CHAPTER_EXCERPT_CHARS),
+                    "end_pos": len(chapter.content),
+                },
+                title=f"第{chapter.chapter_number}章 · 尾部",
+                excerpt=text[:MAX_CHAPTER_EXCERPT_CHARS],
+                why_relevant="最近章节上下文",
+            ))
+
+
+def _gather_entity_evidence(snapshot: ScopeSnapshot, context: dict | None, items: list[EvidenceItem]) -> None:
+    """Add world-model entity rows as evidence items."""
+    target_id = (context or {}).get("entity_id")
+    if target_id:
+        entity = snapshot.entities_by_id.get(target_id)
+        if entity:
+            desc = entity.description[:500] if entity.description else "(无描述)"
+            attrs = snapshot.attributes_by_entity.get(entity.id, [])
+            attr_text = "; ".join(f"{attr.key}={attr.surface[:80]}" for attr in attrs[:5])
+            excerpt = f"{entity.name} ({entity.entity_type}): {desc}"
+            if attr_text:
+                excerpt += f"\n属性: {attr_text}"
+            items.append(EvidenceItem(
+                evidence_id=f"ent_{entity.id}",
+                source_type="world_entity",
+                source_ref={"entity_id": entity.id},
+                title=f"实体 · {entity.name}",
+                excerpt=excerpt,
+                why_relevant="当前研究目标实体",
+            ))
+
+
+def _gather_relationship_evidence(snapshot: ScopeSnapshot, context: dict | None, items: list[EvidenceItem]) -> None:
+    """Add relationship rows as evidence for relationship-scoped work."""
+    target_id = (context or {}).get("entity_id")
+    if not target_id:
+        return
+    for relationship in snapshot.relationships[:10]:
+        if relationship.source_id == target_id or relationship.target_id == target_id:
+            source = snapshot.entities_by_id.get(relationship.source_id)
+            target = snapshot.entities_by_id.get(relationship.target_id)
+            source_name = source.name if source else f"#{relationship.source_id}"
+            target_name = target.name if target else f"#{relationship.target_id}"
+            description = relationship.description[:200] if relationship.description else ""
+            items.append(EvidenceItem(
+                evidence_id=f"rel_{relationship.id}",
+                source_type="world_relationship",
+                source_ref={
+                    "relationship_id": relationship.id,
+                    "source_id": relationship.source_id,
+                    "target_id": relationship.target_id,
+                },
+                title=f"{source_name} --[{relationship.label}]--> {target_name}",
+                excerpt=f"关系: {source_name} → {relationship.label} → {target_name}. {description}",
+                why_relevant="与目标实体相关的已知关系",
+            ))
+
+
+def _gather_draft_row_evidence(snapshot: ScopeSnapshot, items: list[EvidenceItem]) -> None:
+    """Surface draft rows themselves as first-class evidence in draft governance."""
+    for entity in snapshot.draft_entities[:6]:
+        attrs = snapshot.attributes_by_entity.get(entity.id, [])
+        attr_text = "; ".join(f"{attr.key}={attr.surface[:60]}" for attr in attrs[:4])
+        excerpt = f"[草稿实体] {entity.name} ({entity.entity_type})"
+        if entity.description:
+            excerpt += f"\n描述: {entity.description[:200]}"
+        else:
+            excerpt += "\n描述: (无描述)"
+        if attr_text:
+            excerpt += f"\n属性: {attr_text}"
+        items.append(EvidenceItem(
+            evidence_id=f"draft_ent_{entity.id}",
+            source_type="world_entity",
+            source_ref={"entity_id": entity.id},
+            title=f"草稿实体 · {entity.name}",
+            excerpt=excerpt,
+            why_relevant="当前草稿工作集中的实体",
+        ))
+
+    for relationship in snapshot.draft_relationships[:6]:
+        source = snapshot.entities_by_id.get(relationship.source_id)
+        target = snapshot.entities_by_id.get(relationship.target_id)
+        excerpt = f"[草稿关系] {source.name if source else '?'} --[{relationship.label}]--> {target.name if target else '?'}"
+        if relationship.description:
+            excerpt += f"\n描述: {relationship.description[:200]}"
+        else:
+            excerpt += "\n描述: (无描述)"
+        items.append(EvidenceItem(
+            evidence_id=f"draft_rel_{relationship.id}",
+            source_type="world_relationship",
+            source_ref={
+                "relationship_id": relationship.id,
+                "source_id": relationship.source_id,
+                "target_id": relationship.target_id,
+            },
+            title=f"草稿关系 · {relationship.label}",
+            excerpt=excerpt,
+            why_relevant="当前草稿工作集中的关系",
+        ))
+
+    for system in snapshot.draft_systems[:4]:
+        excerpt = f"[草稿体系] {system.name}"
+        if system.description:
+            excerpt += f"\n描述: {system.description[:200]}"
+        items.append(EvidenceItem(
+            evidence_id=f"draft_sys_{system.id}",
+            source_type="world_system",
+            source_ref={"system_id": system.id},
+            title=f"草稿体系 · {system.name}",
+            excerpt=excerpt,
+            why_relevant="当前草稿工作集中的体系",
+        ))
+
+
+def serialize_evidence(evidence: EvidenceItem) -> dict[str, Any]:
+    return {
+        "evidence_id": evidence.evidence_id,
+        "source_type": evidence.source_type,
+        "source_ref": evidence.source_ref,
+        "title": evidence.title,
+        "excerpt": evidence.excerpt,
+        "why_relevant": evidence.why_relevant,
+        "pack_id": evidence.pack_id,
+        "source_refs": evidence.source_refs,
+        "anchor_terms": evidence.anchor_terms,
+        "support_count": evidence.support_count,
+        "preview_excerpt": evidence.preview_excerpt,
+        "expanded": evidence.expanded,
+    }

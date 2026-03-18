@@ -8,10 +8,10 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { PageShell } from '@/components/layout/PageShell'
 import { Home } from '@/pages/Home'
 import { LibraryPage } from '@/pages/LibraryPage'
-import { NovelDetailPage } from '@/pages/NovelDetailPage'
-import { WritingWorkspace } from '@/pages/WritingWorkspace'
+import { NovelStudioPage } from '@/pages/NovelStudioPage'
 import { GenerationResults } from '@/pages/GenerationResults'
-import { WorldModel } from '@/pages/WorldModel'
+import { NovelAtlasPage } from '@/pages/NovelAtlasPage'
+import { NovelShell } from '@/components/novel-shell/NovelShell'
 
 const Login = lazy(() => import('@/pages/Login'))
 const Settings = lazy(() => import('@/pages/Settings'))
@@ -27,7 +27,7 @@ function Layout() {
   const isWorld = pathname.startsWith('/world/')
   return (
     <PageShell
-      // WorldModel manages its own full-height layout + scroll containers.
+      // Atlas manages its own full-height layout + scroll containers.
       // Make the shell fixed-height to avoid the whole page scrolling when sidebars overflow.
       showNavbar={!isWorld}
       className={isWorld ? 'h-screen overflow-hidden' : undefined}
@@ -64,15 +64,19 @@ export default function App() {
                 <Route path="/copyright" element={<CopyrightNotice />} />
                 <Route element={<RequireAuth />}>
                   <Route path="/settings" element={<Settings />} />
-                  <Route path="/world/:novelId" element={<WorldModel />} />
                 </Route>
               </Route>
-              {/* Self-contained new pages */}
+
               <Route element={<RequireAuth />}>
                 <Route path="/library" element={<LibraryPage />} />
-                <Route path="/novel/:novelId" element={<NovelDetailPage />} />
-                <Route path="/novel/:novelId/chapter/:chapterNum/write" element={<WritingWorkspace />} />
-                <Route path="/novel/:novelId/chapter/:chapterNum/results" element={<GenerationResults />} />
+                {/* Novel routes share one Studio/Atlas shell so shell state and agent sessions survive surface switches. */}
+                <Route element={<NovelShell />}>
+                  <Route element={<Layout />}>
+                    <Route path="/world/:novelId" element={<NovelAtlasPage />} />
+                  </Route>
+                  <Route path="/novel/:novelId" element={<NovelStudioPage />} />
+                  <Route path="/novel/:novelId/chapter/:chapterNum/results" element={<GenerationResults />} />
+                </Route>
               </Route>
               {/* Login (standalone) */}
               <Route path="/login" element={<Login />} />

@@ -127,6 +127,44 @@ _TEMPLATES: dict[PromptKey, str] = {
 【世界观设定文本】
 {text}
 """,
+    # ------------------------------------------------------------------
+    # Bootstrap: candidate refinement
+    # ------------------------------------------------------------------
+    PromptKey.BOOTSTRAP_REFINEMENT: """你正在从一部小说的候选词中提炼出世界观实体和关系。
+
+## 输入
+
+候选词（名称: 出现窗口数）:
+{candidate_lines}
+
+共现对（名称A -- 名称B: 共现次数）:
+{pair_lines}
+
+## 任务
+
+1) **过滤噪声**: 去除动词、形容词、普通名词等非实体词（如「一声」「那个」「知道」）。
+2) **合并别名**: 同一角色/地点的不同称呼合并为一个实体，全名为 name，其余放 aliases。例如：「顾慎为」和「顾兄」→ name=顾慎为, aliases=[顾兄]；「荷女」和「小荷」→ name=荷女, aliases=[小荷]。
+3) **分类**: entity_type 从以下选择: Character, Location, Item, Faction, Concept, other。
+4) **关系标签**: label 必须是具体且有信息量的描述（3-6字），能让读者一眼理解两者的关系。禁止使用「关联」「相关」「部属」等笼统词。好的例子: 父女、师徒、宿敌、青梅竹马、同门师兄弟、主仆、持有、坐落于、效忠于。坏的例子: 关联、相关、部属、关系。
+5) 只输出确信度高的实体和关系，宁缺毋滥。
+
+## 示例输出片段
+
+```json
+{{
+  "entities": [
+    {{"name": "顾慎为", "entity_type": "Character", "aliases": ["顾兄", "小顾"]}},
+    {{"name": "太玄宗", "entity_type": "Faction", "aliases": []}}
+  ],
+  "relationships": [
+    {{"source_name": "顾慎为", "target_name": "太玄宗", "label": "弟子出身"}},
+    {{"source_name": "独步王", "target_name": "雨公子", "label": "父女"}}
+  ]
+}}
+```
+
+请直接返回完整 JSON。
+""",
 }
 
 register_templates("zh", _TEMPLATES)

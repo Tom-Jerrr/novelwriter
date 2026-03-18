@@ -60,6 +60,15 @@ def test_unknown_locale_falls_back_to_default() -> None:
     assert result == get_prompt(PromptKey.SYSTEM, locale=DEFAULT_LOCALE)
 
 
+def test_regional_locale_falls_back_to_base_language() -> None:
+    register_templates("testlang", {PromptKey.SYSTEM: "base-system"})
+    try:
+        result = get_prompt(PromptKey.SYSTEM, locale="testlang-region")
+        assert result == "base-system"
+    finally:
+        _catalogs.pop("testlang", None)
+
+
 # -----------------------------------------------------------------------
 # 4. Missing key raises KeyError
 # -----------------------------------------------------------------------

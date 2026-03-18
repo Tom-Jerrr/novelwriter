@@ -21,7 +21,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.core.parser import parse_novel_file
-from app.core.worldpack_import import import_worldpack_payload
+from app.core.world.worldpack_import import import_worldpack_payload
 from app.models import Chapter, Novel, User
 
 logger = logging.getLogger(__name__)

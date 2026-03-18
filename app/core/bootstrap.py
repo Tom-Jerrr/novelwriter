@@ -20,9 +20,16 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.core.ai_client import AIClient, StructuredOutputParseError, get_client
 from app.core.llm_semaphore import acquire_llm_slot_blocking, release_llm_slot
-from app.core.world_write import build_relationship_signature, relationship_signature_from_row
-from app.core.window_index import NovelIndex, WindowRef
+from app.core.text import PromptKey, get_prompt
+from app.core.world.write import build_relationship_signature, relationship_signature_from_row
+from app.core.indexing.window_index import NovelIndex, WindowRef
 from app.database import SessionLocal
+from app.language import resolve_prompt_locale
+from app.language_policy import (
+    detect_language_from_text,
+    get_language_policy,
+    resolve_text_processing_language,
+)
 from app.models import BootstrapJob, Chapter, Novel, WorldEntity, WorldRelationship
 
 try:
@@ -47,7 +54,9 @@ DEFAULT_COMMON_WORDS_DIR = "data/common_words"
 DEFAULT_CJK_SPACE_RATIO_THRESHOLD = 0.05
 DEFAULT_STALE_JOB_TIMEOUT_SECONDS = 900
 BOOTSTRAP_PARSE_ERROR_MESSAGE = "AI 输出解析失败，请重试"
+BOOTSTRAP_PARSE_ERROR_KEY = "bootstrap.error.parse_failed"
 BOOTSTRAP_GENERIC_ERROR_MESSAGE = "引导扫描失败，请稍后重试"
+BOOTSTRAP_GENERIC_ERROR_KEY = "bootstrap.error.generic"
 BOOTSTRAP_MODE_INITIAL = "initial"
 BOOTSTRAP_MODE_INDEX_REFRESH = "index_refresh"
 BOOTSTRAP_MODE_REEXTRACT = "reextract"
@@ -131,20 +140,28 @@ class WhitespaceTokenizer:
         return text.split()
 
 
+class CharacterNgramTokenizer:
+    def __init__(self, *, n: int = 2):
+        self.n = max(2, int(n))
+
+    def tokenize(self, text: str) -> list[str]:
+        cleaned = "".join(ch if ch not in _TRIM_CHARS else " " for ch in text)
+        chunks = [chunk for chunk in cleaned.split() if chunk]
+        tokens: list[str] = []
+        for chunk in chunks:
+            if len(chunk) < 2:
+                continue
+            if len(chunk) <= self.n:
+                tokens.append(chunk)
+                continue
+            tokens.extend(chunk[i : i + self.n] for i in range(0, len(chunk) - self.n + 1))
+        return tokens
+
+
 class JiebaTokenizer:
     def tokenize(self, text: str) -> list[str]:
         if jieba is None:
-            cleaned = "".join(ch if ch not in _TRIM_CHARS else " " for ch in text)
-            chunks = [chunk for chunk in cleaned.split() if chunk]
-            tokens: list[str] = []
-            for chunk in chunks:
-                if len(chunk) < 2:
-                    continue
-                if len(chunk) <= 4:
-                    tokens.append(chunk)
-                    continue
-                tokens.extend(chunk[i : i + 2] for i in range(0, len(chunk) - 1))
-            return tokens
+            return CharacterNgramTokenizer(n=2).tokenize(text)
         return [token for token in jieba.lcut(text) if token]
 
 
@@ -244,22 +261,21 @@ def transition_bootstrap_job(
 
 
 def detect_language(text: str, *, cjk_space_ratio_threshold: float = DEFAULT_CJK_SPACE_RATIO_THRESHOLD) -> str:
-    if not text:
-        return "en"
-    space_ratio = text.count(" ") / max(len(text), 1)
-    if space_ratio < cjk_space_ratio_threshold:
-        return "zh"
-    return "en"
+    return detect_language_from_text(text, cjk_space_ratio_threshold=cjk_space_ratio_threshold)
 
 
 def get_tokenizer(
     language: str,
     *,
     cjk_tokenizer: Tokenizer | None = None,
+    cjk_ngram_tokenizer: Tokenizer | None = None,
     whitespace_tokenizer: Tokenizer | None = None,
 ) -> Tokenizer:
-    if language == "zh":
+    policy = get_language_policy(language)
+    if policy.tokenizer_kind == "jieba":
         return cjk_tokenizer or JiebaTokenizer()
+    if policy.tokenizer_kind == "cjk_bigram":
+        return cjk_ngram_tokenizer or CharacterNgramTokenizer(n=2)
     return whitespace_tokenizer or WhitespaceTokenizer()
 
 
@@ -269,7 +285,7 @@ def tokenize_text(
     language: str | None = None,
     tokenizer: Tokenizer | None = None,
 ) -> tuple[str, list[str]]:
-    resolved_language = language or detect_language(text)
+    resolved_language = resolve_text_processing_language(language, sample_text=text)
     resolved_tokenizer = tokenizer or get_tokenizer(resolved_language)
     return resolved_language, resolved_tokenizer.tokenize(text)
 
@@ -300,8 +316,9 @@ def _load_common_words_file(file_path: Path, language_code: str) -> frozenset[st
             word = raw_line.strip()
             if not word or word.startswith("#"):
                 continue
+            normalized_word = get_language_policy(language_code).normalize_for_matching(word)
             words.add(word)
-            words.add(word.lower())
+            words.add(normalized_word)
 
     frozen_words = frozenset(words)
     _COMMON_WORDS_CACHE[cache_key] = frozen_words
@@ -309,7 +326,8 @@ def _load_common_words_file(file_path: Path, language_code: str) -> frozenset[st
 
 
 def load_common_words(language: str, *, common_words_dir: str = DEFAULT_COMMON_WORDS_DIR) -> set[str]:
-    normalized_language = "zh" if language == "zh" else "en"
+    policy = get_language_policy(language)
+    normalized_language = policy.common_words_bucket
     base_dir = _resolve_common_words_base_dir(common_words_dir)
     combined_cache_key = (str(base_dir), normalized_language)
     cached = _COMMON_WORDS_COMBINED_CACHE.get(combined_cache_key)
@@ -330,14 +348,20 @@ def load_common_words(language: str, *, common_words_dir: str = DEFAULT_COMMON_W
     return set(merged)
 
 
-def extract_candidates(tokens: Sequence[str], common_words: set[str]) -> dict[str, int]:
+def extract_candidates(
+    tokens: Sequence[str],
+    common_words: set[str],
+    *,
+    language: str | None = None,
+) -> dict[str, int]:
+    policy = get_language_policy(language)
     counts: Counter[str] = Counter()
     for token in tokens:
-        normalized = normalize_token(token)
+        normalized = policy.normalize_token(token)
         if len(normalized) < 2:
             continue
-        lowered = normalized.lower()
-        if normalized in common_words or lowered in common_words:
+        match_key = policy.normalize_for_matching(normalized)
+        if normalized in common_words or match_key in common_words:
             continue
         counts[normalized] += 1
     return dict(counts)
@@ -484,6 +508,7 @@ def _build_refinement_prompt(
     cooccurrence_pairs: Sequence[tuple[str, str, int]],
     *,
     max_candidates: int,
+    prompt_locale: str | None = None,
 ) -> str:
     sorted_candidates = sorted(importance.items(), key=lambda item: (-item[1], item[0]))[:max_candidates]
     sorted_pairs = list(cooccurrence_pairs[: max_candidates * 2])
@@ -491,37 +516,10 @@ def _build_refinement_prompt(
     candidate_lines = "\n".join([f"- {name}: {count}" for name, count in sorted_candidates]) or "- (none)"
     pair_lines = "\n".join([f"- {left} -- {right}: {count}" for left, right, count in sorted_pairs]) or "- (none)"
 
-    return (
-        "你正在从一部小说的候选词中提炼出世界观实体和关系。\n\n"
-        "## 输入\n\n"
-        "候选词（名称: 出现窗口数）:\n"
-        f"{candidate_lines}\n\n"
-        "共现对（名称A -- 名称B: 共现次数）:\n"
-        f"{pair_lines}\n\n"
-        "## 任务\n\n"
-        "1) **过滤噪声**: 去除动词、形容词、普通名词等非实体词（如「一声」「那个」「知道」）。\n"
-        "2) **合并别名**: 同一角色/地点的不同称呼合并为一个实体，全名为 name，其余放 aliases。"
-        "例如：「顾慎为」和「顾兄」→ name=顾慎为, aliases=[顾兄]；「荷女」和「小荷」→ name=荷女, aliases=[小荷]。\n"
-        "3) **分类**: entity_type 从以下选择: Character, Location, Item, Faction, Concept, other。\n"
-        "4) **关系标签**: label 必须是具体且有信息量的描述（3-6字），能让读者一眼理解两者的关系。"
-        "禁止使用「关联」「相关」「部属」等笼统词。"
-        "好的例子: 父女、师徒、宿敌、青梅竹马、同门师兄弟、主仆、持有、坐落于、效忠于。"
-        "坏的例子: 关联、相关、部属、关系。\n"
-        "5) 只输出确信度高的实体和关系，宁缺毋滥。\n\n"
-        "## 示例输出片段\n\n"
-        "```json\n"
-        "{\n"
-        '  "entities": [\n'
-        '    {"name": "顾慎为", "entity_type": "Character", "aliases": ["顾兄", "小顾"]},\n'
-        '    {"name": "太玄宗", "entity_type": "Faction", "aliases": []}\n'
-        "  ],\n"
-        '  "relationships": [\n'
-        '    {"source_name": "顾慎为", "target_name": "太玄宗", "label": "弟子出身"},\n'
-        '    {"source_name": "独步王", "target_name": "雨公子", "label": "父女"}\n'
-        "  ]\n"
-        "}\n"
-        "```\n\n"
-        "请直接返回完整 JSON。\n"
+    locale = prompt_locale or "zh"
+    return get_prompt(PromptKey.BOOTSTRAP_REFINEMENT, locale=locale).format(
+        candidate_lines=candidate_lines,
+        pair_lines=pair_lines,
     )
 
 
@@ -534,11 +532,17 @@ async def refine_candidates_with_llm(
     client: AIClient | None = None,
     llm_config: dict | None = None,
     user_id: int | None = None,
+    novel_language: str | None = None,
 ) -> BootstrapRefinementResult:
     if not importance:
         return BootstrapRefinementResult()
 
-    prompt = _build_refinement_prompt(importance, cooccurrence_pairs, max_candidates=max_candidates)
+    prompt_locale = resolve_prompt_locale(novel_language=novel_language)
+    prompt = _build_refinement_prompt(
+        importance, cooccurrence_pairs,
+        max_candidates=max_candidates,
+        prompt_locale=prompt_locale,
+    )
     llm_kwargs = llm_config or {}
     ai = client or get_client()
     return await ai.generate_structured(
@@ -554,14 +558,14 @@ async def refine_candidates_with_llm(
 
 
 def _normalize_aliases(raw_aliases: Sequence[str], canonical_name: str) -> list[str]:
-    canonical_key = canonical_name.strip().lower()
+    canonical_key = get_language_policy(sample_text=canonical_name).normalize_for_matching(canonical_name.strip())
     seen = {canonical_key}
     aliases: list[str] = []
     for raw_alias in raw_aliases:
         alias = raw_alias.strip()
         if not alias:
             continue
-        key = alias.lower()
+        key = get_language_policy(sample_text=alias).normalize_for_matching(alias)
         if key in seen:
             continue
         seen.add(key)
@@ -573,10 +577,11 @@ def _is_refinement_parse_error(exc: Exception) -> bool:
     return isinstance(exc, StructuredOutputParseError)
 
 
-def _sanitize_bootstrap_error(exc: Exception) -> str:
+def _sanitize_bootstrap_error(exc: Exception) -> tuple[str, str]:
+    """Return (user_message, message_key) for a bootstrap failure."""
     if _is_refinement_parse_error(exc):
-        return BOOTSTRAP_PARSE_ERROR_MESSAGE
-    return BOOTSTRAP_GENERIC_ERROR_MESSAGE
+        return BOOTSTRAP_PARSE_ERROR_MESSAGE, BOOTSTRAP_PARSE_ERROR_KEY
+    return BOOTSTRAP_GENERIC_ERROR_MESSAGE, BOOTSTRAP_GENERIC_ERROR_KEY
 
 
 def _normalize_timestamp(value: datetime | None) -> datetime | None:
@@ -845,6 +850,9 @@ async def run_bootstrap_job(
         job = db.query(BootstrapJob).filter(BootstrapJob.id == job_id).first()
         if not job:
             return
+        novel = db.query(Novel).filter(Novel.id == job.novel_id).first()
+        if novel is None:
+            raise ValueError(f"Novel not found: {job.novel_id}")
 
         mode = resolve_bootstrap_mode(job.mode)
         draft_policy = (
@@ -867,7 +875,7 @@ async def run_bootstrap_job(
         db.commit()
 
         t0 = time.monotonic()
-        language, tokens = tokenize_text(combined_text)
+        language, tokens = tokenize_text(combined_text, language=getattr(novel, "language", None))
         common_words = load_common_words(
             language,
             common_words_dir=settings.bootstrap_common_words_dir,
@@ -878,7 +886,7 @@ async def run_bootstrap_job(
         db.commit()
 
         t0 = time.monotonic()
-        candidates = extract_candidates(tokens, common_words)
+        candidates = extract_candidates(tokens, common_words, language=language)
         logger.info("bootstrap[%d]: extracted %d candidates in %.1fs", job_id, len(candidates), time.monotonic() - t0)
 
         transition_bootstrap_job(job, "windowing", detail="building window index")
@@ -926,6 +934,7 @@ async def run_bootstrap_job(
                     client=client,
                     llm_config=llm_config,
                     user_id=user_id,
+                    novel_language=getattr(novel, "language", None),
                 )
             finally:
                 release_llm_slot()
@@ -961,11 +970,12 @@ async def run_bootstrap_job(
     except Exception as exc:  # pragma: no cover - defensive background task guard
         db.rollback()
         logger.exception("bootstrap background task failed")
-        user_error = _sanitize_bootstrap_error(exc)
+        user_error, error_key = _sanitize_bootstrap_error(exc)
         try:
             failed_job = db.query(BootstrapJob).filter(BootstrapJob.id == job_id).first()
             if failed_job and failed_job.status != "failed":
                 transition_bootstrap_job(failed_job, "failed", detail="bootstrap failed", error=user_error)
+                failed_job.result = {"message_key": error_key}
                 db.commit()
         except Exception:
             db.rollback()

@@ -113,9 +113,9 @@ test('import worldpack from onboarding dialog populates world model', async ({ p
 
   // Verify the imported entity appears in the Entities tab.
   await page.getByTestId('tab-entities').click()
-  await expect(page.getByTestId('entity-sidebar')).toBeVisible({ timeout: 15_000 })
-  await page.getByTestId('entity-sidebar').getByTestId('entity-search').fill(entityName)
+  await expect(page.getByTestId('entity-navigator')).toBeVisible({ timeout: 15_000 })
+  await page.getByTestId('entity-navigator').getByTestId('entity-search').fill(entityName)
   await expect(
-    page.getByTestId('entity-sidebar').getByRole('button', { name: new RegExp(entityName) }),
+    page.getByTestId('entity-navigator').getByRole('button', { name: new RegExp(entityName) }),
   ).toBeVisible()
 })

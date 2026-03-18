@@ -96,11 +96,13 @@ test('entity CRUD: create → sidebar → detail → edit name → delete', asyn
   // Create
   await page.getByTestId('entity-create').click()
   // Newly created drafts are sorted to the top; pick the first "新实体" row.
-  const entityBtn = page.getByTestId('entity-sidebar').getByRole('button', { name: /^新实体$/ }).first()
+  const entityBtn = page.getByTestId('entity-navigator').getByRole('button', { name: /^新实体$/ }).first()
   await expect(entityBtn).toBeVisible({ timeout: 10000 })
 
-  // Click sidebar entity → detail panel loads
-  await entityBtn.click()
+  // Atlas sidebars now have richer bottom panels; keyboard activation is more
+  // stable than pointer clicks when rows sit near floating surfaces.
+  await entityBtn.focus()
+  await entityBtn.press('Enter')
   const detail = page.getByTestId('entity-detail')
   await expect(detail).toBeVisible({ timeout: 10000 })
 
@@ -108,13 +110,13 @@ test('entity CRUD: create → sidebar → detail → edit name → delete', asyn
   await detail.getByTestId('inline-edit-display').first().click()
   await detail.getByTestId('inline-edit-input').first().fill('测试角色')
   await detail.getByTestId('inline-edit-input').first().press('Enter')
-  await expect(page.getByTestId('entity-sidebar').getByRole('button', { name: /测试角色/ })).toBeVisible({ timeout: 10000 })
+  await expect(page.getByTestId('entity-navigator').getByRole('button', { name: /测试角色/ })).toBeVisible({ timeout: 10000 })
 
   // Delete via ··· menu
   await detail.getByRole('button', { name: '···' }).click()
   await page.getByTestId('entity-delete-menu').click()
   await page.getByTestId('confirm-ok').click()
-  await expect(page.getByTestId('entity-sidebar').getByRole('button', { name: /测试角色/ })).not.toBeVisible()
+  await expect(page.getByTestId('entity-navigator').getByRole('button', { name: /测试角色/ })).not.toBeVisible()
 })
 
 // ---------------------------------------------------------------------------
@@ -136,7 +138,10 @@ test('attribute CRUD: add → shows in row → toggle visibility → delete', as
 
   await page.goto(`/world/${novelId}`)
   await page.getByTestId('tab-entities').click()
-  await page.getByRole('button', { name: new RegExp(`属性实体_${RUN}`) }).click()
+  const entityNavigator = page.getByTestId('entity-navigator')
+  const entityRow = entityNavigator.getByRole('button', { name: new RegExp(`属性实体_${RUN}`) })
+  await entityRow.focus()
+  await entityRow.press('Enter')
   await expect(page.getByText('属性 (1)')).toBeVisible({ timeout: 10000 })
 
   // Verify attribute key/value visible in collapsed row
@@ -178,7 +183,7 @@ test('relationship: create → exists → delete', async ({ page, request }) => 
   await page.getByTestId('tab-relationships').click()
 
   // Select source entity in sidebar
-  const sidebar = page.getByTestId('entity-sidebar')
+  const sidebar = page.getByTestId('entity-navigator')
   await sidebar.getByTestId('entity-search').fill(`关系源_${RUN}`)
   const sourceRow = sidebar.getByRole('button', { name: new RegExp(`关系源_${RUN}`) })
   // Clicks can be flaky due to overlapping bottom panels; use keyboard activation instead.
@@ -236,7 +241,9 @@ test('system: create → auto-enters editor → edit name → back shows in list
   }
   expect(newSystemId).not.toBeNull()
 
-  await page.getByTestId(`system-row-${newSystemId!}`).click()
+  const systemRow = page.getByTestId(`system-row-${newSystemId!}`)
+  await systemRow.focus()
+  await systemRow.press('Enter')
   await expect(page.getByTestId('system-editor')).toBeVisible({ timeout: 10000 })
 
   // Edit system name via InlineEdit
@@ -275,7 +282,7 @@ test('visibility dot: click cycles visibility without triggering parent action',
 
   await page.goto(`/world/${novelId}`)
   await page.getByTestId('tab-entities').click()
-  const sidebar = page.getByTestId('entity-sidebar')
+  const sidebar = page.getByTestId('entity-navigator')
   await sidebar.getByTestId('entity-search').fill(`可见性测试_${RUN}`)
   const entityRow = sidebar.getByRole('button', { name: new RegExp(`可见性测试_${RUN}`) })
   await entityRow.focus()
@@ -301,9 +308,10 @@ test('visibility dot: click cycles visibility without triggering parent action',
   await expect(page.getByText('可见性体系')).toBeVisible({ timeout: 10000 })
   await expect(page.getByText('选择一个体系开始编辑')).toBeVisible()
 
-  // Click the visibility dot on system row
   const sysRow = page.getByTestId(`system-row-${sys.id}`)
-  await sysRow.getByTestId('visibility-dot').click()
+  const sysVisibilityDot = sysRow.getByTestId('visibility-dot')
+  await sysVisibilityDot.focus()
+  await sysVisibilityDot.press('Enter')
   await page.waitForTimeout(300)
 
   // Should NOT have entered editor (still shows empty state).
@@ -326,7 +334,7 @@ test('attribute: create → auto-expands → shows placeholders → editable', a
 
   await page.goto(`/world/${novelId}`)
   await page.getByTestId('tab-entities').click()
-  const sidebar = page.getByTestId('entity-sidebar')
+  const sidebar = page.getByTestId('entity-navigator')
   await sidebar.getByTestId('entity-search').fill(`属性编辑_${RUN}`)
   const entityRow = sidebar.getByRole('button', { name: new RegExp(`属性编辑_${RUN}`) })
   await entityRow.focus()
@@ -390,7 +398,7 @@ test('star graph: click peripheral node → becomes new center', async ({ page, 
   await page.getByTestId('tab-relationships').click()
 
   // Select e1 as center
-  const sidebar = page.getByTestId('entity-sidebar')
+  const sidebar = page.getByTestId('entity-navigator')
   await sidebar.getByTestId('entity-search').fill(`图中心_${RUN}`)
   const centerRow = sidebar.getByRole('button', { name: new RegExp(`图中心_${RUN}`) })
   await centerRow.focus()

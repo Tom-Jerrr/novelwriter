@@ -5,6 +5,7 @@ from datetime import datetime
 from enum import Enum
 
 from app.config import MAX_CONTEXT_CHAPTERS
+from app.language import DEFAULT_LANGUAGE, normalize_language_code
 from app.world_visibility import WorldVisibility, normalize_visibility
 
 WorldOrigin = Literal["manual", "bootstrap", "worldpack", "worldgen"]
@@ -16,6 +17,12 @@ WarningMessageParam = str | int | float | bool | None
 class NovelBase(BaseModel):
     title: str
     author: str = ""
+    language: str = Field(default=DEFAULT_LANGUAGE, min_length=1, max_length=50)
+
+    @field_validator("language", mode="before")
+    @classmethod
+    def _normalize_language_field(cls, v: object) -> object:
+        return normalize_language_code(v if isinstance(v, str) else None, default=DEFAULT_LANGUAGE)
 
 
 class NovelCreate(NovelBase):
@@ -794,3 +801,195 @@ class WorldpackImportResponse(BaseModel):
     pack_id: str
     counts: WorldpackImportCounts
     warnings: List[WorldpackImportWarning] = Field(default_factory=list)
+
+
+# =============================================================================
+# Copilot Schemas
+# =============================================================================
+
+CopilotMode = Literal["research", "current_entity", "draft_cleanup"]
+CopilotScope = Literal["whole_book", "current_entity", "current_tab"]
+CopilotContextTab = Literal["entities", "relationships", "review", "systems"]
+CopilotContextSurface = Literal["studio", "atlas"]
+CopilotContextStage = Literal[
+    "chapter",
+    "write",
+    "results",
+    "entity",
+    "relationship",
+    "system",
+    "review",
+]
+
+
+class CopilotContextData(BaseModel):
+    entity_id: Optional[int] = None
+    tab: Optional[CopilotContextTab] = None
+    surface: Optional[CopilotContextSurface] = None
+    stage: Optional[CopilotContextStage] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_atlas_stage_aliases(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+
+        normalized = dict(data)
+        raw_stage = normalized.get("stage")
+        atlas_tabs = {"entities", "relationships", "review", "systems"}
+        if raw_stage in atlas_tabs and normalized.get("tab") is None:
+            normalized["tab"] = raw_stage
+        if normalized.get("surface") == "atlas" and raw_stage in atlas_tabs:
+            normalized.pop("stage", None)
+        elif raw_stage in {"entities", "relationships", "systems"}:
+            normalized.pop("stage", None)
+        return normalized
+
+
+class CopilotSessionOpenRequest(BaseModel):
+    mode: CopilotMode
+    scope: CopilotScope
+    context: Optional[CopilotContextData] = None
+    interaction_locale: str = Field(default="zh", max_length=10)
+    display_title: str = Field(default="", max_length=255)
+
+    @model_validator(mode="after")
+    def _validate_context_contract(self):
+        context = self.context
+
+        if self.scope == "whole_book":
+            return self
+
+        if self.scope == "current_entity":
+            if self.mode != "current_entity":
+                raise ValueError("current_entity scope requires current_entity mode")
+            if context is None or context.entity_id is None:
+                raise ValueError("current_entity scope requires context.entity_id")
+            return self
+
+        if context is None or context.tab is None:
+            raise ValueError("current_tab scope requires context.tab")
+
+        if self.mode == "draft_cleanup" and context.tab != "review":
+            raise ValueError("draft_cleanup current_tab scope requires context.tab=review")
+
+        if self.mode == "research" and context.tab != "relationships":
+            raise ValueError("research current_tab scope requires context.tab=relationships")
+
+        return self
+
+
+class CopilotSessionResponse(BaseModel):
+    session_id: str
+    signature: str
+    mode: str
+    scope: str
+    context: Optional[CopilotContextData] = None
+    interaction_locale: str
+    display_title: str
+    created: bool
+    created_at: datetime
+
+
+class CopilotRunCreateRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=4000)
+    quick_action_id: Optional[str] = None
+    resume_run_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
+
+
+class CopilotTraceStepResponse(BaseModel):
+    step_id: str
+    kind: str
+    status: str
+    summary: str
+
+
+class CopilotEvidenceResponse(BaseModel):
+    evidence_id: str
+    source_type: str
+    source_ref: Optional[dict] = None
+    title: str
+    excerpt: str
+    why_relevant: str
+    pack_id: Optional[str] = None
+    source_refs: List[dict] = Field(default_factory=list)
+    anchor_terms: List[str] = Field(default_factory=list)
+    support_count: Optional[int] = None
+    preview_excerpt: Optional[str] = None
+    expanded: bool = False
+
+
+class CopilotSuggestionTargetResponse(BaseModel):
+    resource: Literal["entity", "relationship", "system"]
+    resource_id: Optional[int] = None
+    label: str
+    tab: str
+    entity_id: Optional[int] = None
+    review_kind: Optional[str] = None
+    highlight_id: Optional[int] = None
+
+
+class CopilotFieldDeltaResponse(BaseModel):
+    field: str
+    label: str
+    before: Optional[str] = None
+    after: str
+
+
+class CopilotSuggestionPreviewResponse(BaseModel):
+    target_label: str
+    summary: str
+    field_deltas: List[CopilotFieldDeltaResponse] = Field(default_factory=list)
+    evidence_quotes: List[str] = Field(default_factory=list)
+    actionable: bool
+    non_actionable_reason: Optional[str] = None
+
+
+class CopilotApplyActionResponse(BaseModel):
+    type: str
+    entity_id: Optional[int] = None
+    relationship_id: Optional[int] = None
+    system_id: Optional[int] = None
+    data: dict = Field(default_factory=dict)
+
+
+class CopilotSuggestionResponse(BaseModel):
+    suggestion_id: str
+    kind: str
+    title: str
+    summary: str
+    evidence_ids: List[str] = Field(default_factory=list)
+    target: CopilotSuggestionTargetResponse
+    preview: CopilotSuggestionPreviewResponse
+    apply: Optional[CopilotApplyActionResponse] = None
+    status: str
+
+
+class CopilotRunResponse(BaseModel):
+    run_id: str
+    status: str
+    prompt: str
+    answer: Optional[str] = None
+    trace: List[CopilotTraceStepResponse] = Field(default_factory=list)
+    evidence: List[CopilotEvidenceResponse] = Field(default_factory=list)
+    suggestions: List[CopilotSuggestionResponse] = Field(default_factory=list)
+    error: Optional[str] = None
+
+
+class CopilotApplyRequest(BaseModel):
+    suggestion_ids: List[str] = Field(min_length=1, max_length=50)
+
+
+class CopilotApplyResultItem(BaseModel):
+    suggestion_id: str
+    success: bool
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+class CopilotApplyResponse(BaseModel):
+    results: List[CopilotApplyResultItem]
+
+
+class CopilotDismissRequest(BaseModel):
+    suggestion_ids: List[str] = Field(min_length=1, max_length=50)

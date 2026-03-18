@@ -1,0 +1,221 @@
+import { type KeyboardEvent } from 'react'
+import { ArrowLeft, Compass } from 'lucide-react'
+import { InlineEdit } from '@/components/world-model/shared/InlineEdit'
+import { VisibilityDot } from '@/components/world-model/shared/VisibilityDot'
+import { NwButton } from '@/components/ui/nw-button'
+import { useConfirmSystems, useUpdateSystem, useWorldSystem, useWorldSystems } from '@/hooks/world/useSystems'
+import { getSystemDisplayTypeLabel, isLegacyGraphDisplayType } from '@/lib/worldSystemDisplay'
+import { cn } from '@/lib/utils'
+import type { WorldSystem } from '@/types/api'
+
+function getSystemStructureSummary(system: WorldSystem) {
+  if (isLegacyGraphDisplayType(system.display_type)) {
+    return '旧图谱类型，仅在 Atlas 中提供完整只读查看。'
+  }
+
+  if (system.display_type === 'hierarchy') {
+    const nodes = Array.isArray((system.data as { nodes?: unknown[] }).nodes)
+      ? (system.data as { nodes: unknown[] }).nodes.length
+      : 0
+    return `层级节点 ${nodes} 个`
+  }
+
+  if (system.display_type === 'timeline') {
+    const events = Array.isArray((system.data as { events?: unknown[] }).events)
+      ? (system.data as { events: unknown[] }).events.length
+      : 0
+    return `时间节点 ${events} 个`
+  }
+
+  const items = Array.isArray((system.data as { items?: unknown[] }).items)
+    ? (system.data as { items: unknown[] }).items.length
+    : 0
+  return `列表规则 ${items} 条`
+}
+
+export function StudioSystemStage({
+  novelId,
+  systemId,
+  onSelectSystem,
+  onOpenAtlas,
+  onReturnToArtifact,
+}: {
+  novelId: number
+  systemId: number | null
+  onSelectSystem: (systemId: number) => void
+  onOpenAtlas: () => void
+  onReturnToArtifact?: () => void
+}) {
+  const { data: systems = [] } = useWorldSystems(novelId)
+  const { data: system } = useWorldSystem(novelId, systemId)
+  const updateSystem = useUpdateSystem(novelId)
+  const confirmSystems = useConfirmSystems(novelId)
+
+  return (
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden" data-testid="studio-system-stage">
+      <div className="shrink-0 border-b border-[var(--nw-glass-border)] px-6 py-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-1">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+              Studio
+            </div>
+            <h2 className="text-lg font-semibold text-foreground">
+              体系检查
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              在写作上下文中检查体系描述与可见性；结构编辑、约束维护和更高密度治理仍留给 Atlas。
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {onReturnToArtifact ? (
+              <NwButton
+                onClick={onReturnToArtifact}
+                variant="glass"
+                className="rounded-[10px] px-4 py-2 text-sm font-medium"
+              >
+                <ArrowLeft size={14} />
+                返回结果
+              </NwButton>
+            ) : null}
+            <NwButton
+              onClick={onOpenAtlas}
+              variant="accentOutline"
+              className="rounded-[10px] px-4 py-2 text-sm font-medium"
+            >
+              <Compass size={14} />
+              在 Atlas 中打开
+            </NwButton>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+        <div className="w-[280px] shrink-0 border-r border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] backdrop-blur-2xl overflow-hidden flex flex-col min-h-0">
+          <div className="shrink-0 p-4 space-y-2">
+            <div className="text-sm font-medium text-foreground">世界体系</div>
+            <div className="text-xs text-muted-foreground">
+              共 {systems.length} 个体系
+            </div>
+          </div>
+
+          <div className="nw-scrollbar-thin min-h-0 flex-1 overflow-y-auto">
+            {systems.length === 0 ? (
+              <div className="px-4 py-2 text-sm text-muted-foreground">
+                暂无体系
+              </div>
+            ) : (
+              systems.map((candidate) => {
+                const selected = candidate.id === systemId
+                return (
+                  <div
+                    key={candidate.id}
+                    className={cn(
+                      'w-full px-4 py-2 text-left text-sm flex items-center gap-2 transition-colors cursor-pointer',
+                      selected
+                        ? 'bg-[var(--nw-glass-bg-hover)] border-l-2 border-l-accent'
+                        : 'hover:bg-[var(--nw-glass-bg-hover)]',
+                    )}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => onSelectSystem(candidate.id)}
+                    onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        onSelectSystem(candidate.id)
+                      }
+                    }}
+                  >
+                    {candidate.status === 'draft' && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--color-status-draft))] shrink-0" />
+                    )}
+                    <span className="truncate flex-1 text-foreground">
+                      {candidate.name || '未命名体系'}
+                    </span>
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {getSystemDisplayTypeLabel(candidate.display_type)}
+                    </span>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </div>
+
+        <div className="flex-1 min-w-0 overflow-y-auto">
+          {!systemId || !system ? (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              选择一个体系开始检查。
+            </div>
+          ) : (
+            <div className="mx-auto flex max-w-5xl flex-col gap-4 px-8 py-8">
+              <div className="rounded-2xl border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] backdrop-blur-2xl p-5 space-y-4">
+                <div className="flex flex-wrap items-start gap-3">
+                  <div className="flex-1 min-w-[240px] space-y-2">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <InlineEdit
+                        value={system.name}
+                        onSave={(value) => updateSystem.mutate({ systemId: system.id, data: { name: value } })}
+                        className="text-xl font-semibold text-foreground"
+                        placeholder="体系名称"
+                      />
+                      <VisibilityDot
+                        visibility={system.visibility}
+                        onChange={(visibility) => updateSystem.mutate({ systemId: system.id, data: { visibility } })}
+                      />
+                      <span className="rounded-full border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] px-2 py-0.5 text-xs text-muted-foreground">
+                        {getSystemDisplayTypeLabel(system.display_type)}
+                      </span>
+                      <span
+                        className={cn(
+                          'text-xs',
+                          system.status === 'draft'
+                            ? 'text-[hsl(var(--color-status-draft))]'
+                            : 'text-[hsl(var(--color-status-confirmed))]',
+                        )}
+                      >
+                        {system.status === 'draft' ? '● draft' : '✓ confirmed'}
+                      </span>
+                    </div>
+
+                    <div className="text-sm text-muted-foreground">
+                      {getSystemStructureSummary(system)}
+                    </div>
+                  </div>
+
+                  {system.status === 'draft' ? (
+                    <NwButton
+                      onClick={() => confirmSystems.mutate([system.id])}
+                      variant="accentOutline"
+                      className="rounded-[10px] px-4 py-2 text-sm font-medium"
+                    >
+                      确认体系
+                    </NwButton>
+                  ) : null}
+                </div>
+
+                <div className="rounded-xl border border-[var(--nw-glass-border)] bg-[hsl(var(--background)/0.28)] px-4 py-3 text-xs text-muted-foreground">
+                  Studio 只处理体系的轻量检查与元信息编辑；约束、层级/时间线/列表结构等深度编辑请转到 Atlas。
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] backdrop-blur-2xl p-5">
+                <div className="mb-2 text-xs font-semibold tracking-wider text-muted-foreground">
+                  描述
+                </div>
+                <InlineEdit
+                  value={system.description}
+                  onSave={(value) => updateSystem.mutate({ systemId: system.id, data: { description: value } })}
+                  multiline
+                  variant="transparent"
+                  className="text-sm text-foreground"
+                  placeholder="描述"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}

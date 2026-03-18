@@ -66,7 +66,7 @@ export function useUpdateSystem(novelId: number) {
       // - list:   ['world', novelId, 'systems', params]
       // - detail: ['world', novelId, 'systems', systemId]
       // Guard with `predicate` so we only snapshot list queries here.
-      const previousSystemLists = qc.getQueriesData<WorldSystem[]>({
+      const previousSystemNavigators = qc.getQueriesData<WorldSystem[]>({
         queryKey: worldKeys.systems(novelId),
         predicate: (q) => Array.isArray(q.state.data),
       })
@@ -89,13 +89,13 @@ export function useUpdateSystem(novelId: number) {
         },
       )
 
-      return { previousSystem, previousSystemLists: previousSystemLists as Array<[QueryKey, WorldSystem[] | undefined]> }
+      return { previousSystem, previousSystemNavigators: previousSystemNavigators as Array<[QueryKey, WorldSystem[] | undefined]> }
     },
     onError: (_err, vars, context) => {
       if (context?.previousSystem) {
         qc.setQueryData(worldKeys.system(novelId, vars.systemId), context.previousSystem)
       }
-      context?.previousSystemLists?.forEach(([key, data]) => {
+      context?.previousSystemNavigators?.forEach(([key, data]) => {
         qc.setQueryData(key, data)
       })
       toast(LABELS.ERROR_SAVE_FAILED)

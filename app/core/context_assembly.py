@@ -25,7 +25,8 @@ from typing import Any, Dict, Iterable, Mapping, Sequence, Set
 import ahocorasick
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import WorldEntity, WorldRelationship, WorldSystem
+from app.language_policy import LanguagePolicy, get_language_policy
+from app.models import Novel, WorldEntity, WorldRelationship, WorldSystem
 from app.world_visibility import VIS_ACTIVE, VIS_HIDDEN, VIS_REFERENCE
 
 logger = logging.getLogger(__name__)
@@ -58,20 +59,29 @@ def _iter_entity_keywords(entity: WorldEntity) -> Iterable[str]:
 
 def _build_keyword_index(
     entities: Sequence[WorldEntity],
-) -> tuple[dict[str, int], set[str]]:
+    *,
+    policy: LanguagePolicy,
+) -> tuple[dict[str, int], set[str], dict[str, str]]:
     """
     Build keyword -> entity_id mapping for relevance detection.
 
     Returns:
       - keyword_to_entity_id: only unambiguous keywords (unique mapping)
       - ambiguous_keywords: keywords mapping to multiple entities (disabled triggers)
+      - keyword_display: normalized keyword -> representative display term
     """
     keyword_to_ids: dict[str, set[int]] = {}
+    keyword_display_terms: dict[str, set[str]] = {}
     for entity in entities:
         for keyword in _iter_entity_keywords(entity):
-            if not keyword:
+            raw_keyword = keyword.strip()
+            if not raw_keyword:
                 continue
-            keyword_to_ids.setdefault(keyword, set()).add(int(entity.id))
+            normalized_keyword = policy.normalize_for_matching(raw_keyword)
+            if not normalized_keyword:
+                continue
+            keyword_to_ids.setdefault(normalized_keyword, set()).add(int(entity.id))
+            keyword_display_terms.setdefault(normalized_keyword, set()).add(raw_keyword)
 
     ambiguous_keywords = {k for k, ids in keyword_to_ids.items() if len(ids) > 1}
     keyword_to_entity_id: dict[str, int] = {}
@@ -80,7 +90,16 @@ def _build_keyword_index(
             continue
         # Unambiguous by construction.
         keyword_to_entity_id[keyword] = next(iter(ids))
-    return keyword_to_entity_id, ambiguous_keywords
+    keyword_display = {
+        keyword: sorted(keyword_display_terms.get(keyword, {keyword}), key=lambda value: (len(value), value))[0]
+        for keyword in keyword_to_entity_id
+    }
+    ambiguous_display_terms = {
+        term
+        for keyword in ambiguous_keywords
+        for term in keyword_display_terms.get(keyword, set())
+    }
+    return keyword_to_entity_id, ambiguous_display_terms, keyword_display
 
 
 def _find_relevant_entities(
@@ -95,32 +114,41 @@ def _find_relevant_entities(
     - ambiguous alias/name (keyword maps to multiple entities) does not trigger
     - longest match priority: drop matches fully contained within a longer match span
     """
-    text = chapter_text or ""
+    raw_text = chapter_text or ""
 
     confirmed_entities = (
         db.query(WorldEntity)
         .filter(WorldEntity.novel_id == novel_id, WorldEntity.status == "confirmed")
         .all()
     )
-    if not confirmed_entities or not text.strip():
+    if not confirmed_entities or not raw_text.strip():
         return set(), {}, set()
 
-    keyword_to_entity_id, ambiguous_keywords = _build_keyword_index(confirmed_entities)
+    novel_language = db.query(Novel.language).filter(Novel.id == novel_id).scalar()
+    policy = get_language_policy(novel_language, sample_text=raw_text)
+    text = policy.normalize_for_matching(raw_text)
+
+    keyword_to_entity_id, ambiguous_keywords, keyword_display = _build_keyword_index(
+        confirmed_entities,
+        policy=policy,
+    )
     if not keyword_to_entity_id:
         return set(), {}, ambiguous_keywords
 
     automaton = ahocorasick.Automaton()
     for keyword, entity_id in keyword_to_entity_id.items():
         # Store keyword to recover span length and debug term.
-        automaton.add_word(keyword, (int(entity_id), keyword))
+        automaton.add_word(keyword, (int(entity_id), keyword, keyword_display.get(keyword, keyword)))
     automaton.make_automaton()
 
     matches: list[_SpanMatch] = []
-    for end_idx, (entity_id, keyword) in automaton.iter(text):
+    for end_idx, (entity_id, keyword, display_keyword) in automaton.iter(text):
         start = end_idx - len(keyword) + 1
         if start < 0:
             continue
-        matches.append(_SpanMatch(start=start, end=end_idx + 1, entity_id=entity_id, keyword=keyword))
+        if not policy.match_has_word_boundaries(text, start, end_idx + 1):
+            continue
+        matches.append(_SpanMatch(start=start, end=end_idx + 1, entity_id=entity_id, keyword=display_keyword))
 
     if not matches:
         return set(), {}, ambiguous_keywords

@@ -12,10 +12,12 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func
 from app.database import Base
+from app.language import DEFAULT_LANGUAGE
 from app.world_relationships import canonicalize_relationship_label
 
 
@@ -28,6 +30,10 @@ class Novel(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     title = Column(String(255), nullable=False)
     author = Column(String(255), default="")
+    # IMPORTANT: If Novel.language is ever mutated after creation, you MUST call
+    # invalidate_novel_language_caches(db, novel_id) from app.core.cache to rebuild
+    # the lore automaton and window index (both depend on language).
+    language = Column(String(50), nullable=False, default=DEFAULT_LANGUAGE)
     file_path = Column(String(512), nullable=False)
     total_chapters = Column(Integer, default=0)
     window_index = Column(LargeBinary, nullable=True)
@@ -369,3 +375,84 @@ class ExplorationChapter(Base):
     sort_order = Column(Integer, nullable=False)
 
     exploration = relationship("Exploration", back_populates="chapters")
+
+
+class CopilotSession(Base):
+    """Lightweight copilot session keyed by (novel, user, signature).
+
+    Sessions are cheap and reusable.  The signature encodes
+    (mode, scope, context_json, interaction_locale) so that reopening the
+    same research context recovers the existing session.
+    """
+
+    __tablename__ = "copilot_sessions"
+    __table_args__ = (
+        Index("uq_copilot_sessions_lookup", "novel_id", "user_id", "signature", unique=True),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(36), unique=True, nullable=False, index=True)
+    novel_id = Column(Integer, ForeignKey("novels.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    mode = Column(String(50), nullable=False)
+    scope = Column(String(50), nullable=False)
+    context_json = Column(JSON, nullable=True)
+    interaction_locale = Column(String(10), nullable=False, default="zh")
+    signature = Column(String(255), nullable=False)
+    display_title = Column(String(255), nullable=False, default="")
+    created_at = Column(DateTime, server_default=func.now())
+    last_active_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    runs = relationship("CopilotRun", back_populates="session", cascade="all, delete-orphan")
+
+
+class CopilotRun(Base):
+    """One asynchronous copilot research run within a session.
+
+    Runs are expensive (LLM calls) and bounded: at most one non-terminal
+    run per session, at most N active runs per user.  Active runs use a
+    renewable lease so stale queued/running rows can be reclaimed after
+    process loss or transport failures. Results are persisted as JSON columns
+    for polling and future workspace resumability, and each run snapshots the
+    session UI context at enqueue time so later session reuse cannot retarget
+    an already-queued execution.
+    """
+
+    __tablename__ = "copilot_runs"
+    __table_args__ = (
+        Index("ix_copilot_runs_session_status", "copilot_session_id", "status"),
+        Index("ix_copilot_runs_user_status", "user_id", "status"),
+        Index("ix_copilot_runs_status_lease", "status", "lease_expires_at"),
+        Index(
+            "uq_copilot_runs_active_session",
+            "copilot_session_id",
+            unique=True,
+            sqlite_where=text("status IN ('queued', 'running')"),
+            postgresql_where=text("status IN ('queued', 'running')"),
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(36), unique=True, nullable=False, index=True)
+    copilot_session_id = Column(Integer, ForeignKey("copilot_sessions.id"), nullable=False)
+    novel_id = Column(Integer, ForeignKey("novels.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    quota_reservation_id = Column(Integer, ForeignKey("quota_reservations.id"), nullable=True)
+    quick_action_id = Column(String(64), nullable=True)
+    status = Column(String(20), nullable=False, default="queued")
+    prompt = Column(Text, nullable=False)
+    context_json = Column(JSON, nullable=True)
+    answer = Column(Text, nullable=True)
+    trace_json = Column(JSON, default=list)
+    evidence_json = Column(JSON, default=list)
+    suggestions_json = Column(JSON, default=list)
+    workspace_json = Column(JSON, nullable=True)
+    error = Column(Text, nullable=True)
+    lease_owner = Column(String(64), nullable=True)
+    lease_expires_at = Column(DateTime, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    session = relationship("CopilotSession", back_populates="runs")

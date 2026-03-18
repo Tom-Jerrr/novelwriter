@@ -28,6 +28,7 @@ def novel(db_session):
     novel = Novel(
         title="Test Novel",
         author="Test Author",
+        language="en",
         file_path="/test/path.txt",
         total_chapters=10,
     )
@@ -189,6 +190,112 @@ class TestLoreManager:
         matches = manager.match(text)
 
         assert len(matches) == 2
+
+    def test_match_english_word_boundary_avoids_substring_false_positive(self, db_session, novel):
+        """Short keywords in whitespace languages should not trigger inside longer words."""
+        entry = LoreEntry(
+            novel_id=novel.id,
+            uid=LoreManager.generate_uid(),
+            title="Al",
+            content="A short nickname entry.",
+            entry_type="Character",
+            token_budget=100,
+            priority=5,
+            enabled=True,
+        )
+        db_session.add(entry)
+        db_session.flush()
+        db_session.add(
+            LoreKey(
+                entry_id=entry.id,
+                keyword="Al",
+                is_regex=False,
+                case_sensitive=False,
+            )
+        )
+        db_session.commit()
+
+        manager = LoreManager(novel.id)
+        manager.build_automaton(db_session)
+
+        assert manager.match("Alice arrived at dawn.") == []
+        matches = manager.match("Al arrived at dawn.")
+        assert len(matches) == 1
+        assert matches[0][1] == "Al"
+
+    def test_match_english_possessive_apostrophes_count_as_boundaries(self, db_session, novel):
+        entry = LoreEntry(
+            novel_id=novel.id,
+            uid=LoreManager.generate_uid(),
+            title="Alice",
+            content="Lead character.",
+            entry_type="Character",
+            token_budget=100,
+            priority=5,
+            enabled=True,
+        )
+        db_session.add(entry)
+        db_session.flush()
+        db_session.add(
+            LoreKey(
+                entry_id=entry.id,
+                keyword="Alice",
+                is_regex=False,
+                case_sensitive=False,
+            )
+        )
+        db_session.commit()
+
+        manager = LoreManager(novel.id)
+        manager.build_automaton(db_session)
+
+        straight = manager.match("Alice's lantern was missing.")
+        curly = manager.match("Alice’s lantern was missing.")
+
+        assert [match[1] for match in straight] == ["Alice"]
+        assert [match[1] for match in curly] == ["Alice"]
+
+    def test_match_japanese_keyword_without_spaces(self, db_session):
+        """CJK matching should still work without whitespace boundaries."""
+        novel = Novel(
+            title="Japanese Novel",
+            author="Test Author",
+            language="ja",
+            file_path="/test/ja.txt",
+            total_chapters=1,
+        )
+        db_session.add(novel)
+        db_session.commit()
+        db_session.refresh(novel)
+
+        entry = LoreEntry(
+            novel_id=novel.id,
+            uid=LoreManager.generate_uid(),
+            title="勇者",
+            content="世界を救う主人公。",
+            entry_type="Character",
+            token_budget=100,
+            priority=1,
+            enabled=True,
+        )
+        db_session.add(entry)
+        db_session.flush()
+        db_session.add(
+            LoreKey(
+                entry_id=entry.id,
+                keyword="勇者",
+                is_regex=False,
+                case_sensitive=False,
+            )
+        )
+        db_session.commit()
+
+        manager = LoreManager(novel.id)
+        manager.build_automaton(db_session)
+
+        matches = manager.match("その勇者は城へ向かった。")
+        assert len(matches) == 1
+        assert matches[0][1] == "勇者"
 
     def test_match_disabled_entry(self, db_session, novel, lore_entries):
         """Test that disabled entries are not matched."""

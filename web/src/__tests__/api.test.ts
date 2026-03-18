@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { api, ApiError, streamContinuation, worldApi } from '@/services/api'
+import { api, ApiError, copilotApi, streamContinuation, worldApi } from '@/services/api'
 import { clearLlmConfig, setLlmConfig } from '@/lib/llmConfigStore'
 
 describe('api service', () => {
@@ -274,5 +274,173 @@ describe('api service', () => {
 
     const init = (fetch as unknown as { mock: { calls: Array<[string, RequestInit]> } }).mock.calls[0][1]
     expect(init.credentials).toBe('include')
+  })
+
+  it('canonicalizes legacy atlas session stages when opening copilot sessions', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          session_id: 'session-1',
+          signature: 'sig-1',
+          mode: 'current_entity',
+          scope: 'current_entity',
+          context: { entity_id: 101, surface: 'atlas', stage: 'entities', tab: 'entities' },
+          interaction_locale: 'zh',
+          display_title: '苏瑶',
+          created: false,
+          created_at: '2026-03-16T00:00:00Z',
+        }),
+        { status: 200 },
+      ),
+    )
+
+    const result = await copilotApi.openSession(1, {
+      mode: 'current_entity',
+      scope: 'current_entity',
+      context: { entity_id: 101, surface: 'atlas', tab: 'entities' },
+    })
+
+    expect(result.context).toEqual({
+      entity_id: 101,
+      surface: 'atlas',
+      tab: 'entities',
+      stage: undefined,
+    })
+  })
+
+  it('createRun forwards resume_run_id for explicit interrupted-run retries', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          run_id: 'run-2',
+          status: 'queued',
+          prompt: '补完苏瑶',
+          trace: [],
+          evidence: [],
+          suggestions: [],
+        }),
+        { status: 202 },
+      ),
+    )
+
+    await copilotApi.createRun(1, 'session-1', {
+      prompt: '补完苏瑶',
+      resume_run_id: 'run-1',
+    })
+
+    const init = (fetch as unknown as { mock: { calls: Array<[string, RequestInit]> } }).mock.calls[0][1]
+    expect(init.method).toBe('POST')
+    expect(init.body).toBe(JSON.stringify({
+      prompt: '补完苏瑶',
+      resume_run_id: 'run-1',
+    }))
+  })
+
+  it('parses copilot runs into trusted domain types', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          run_id: 'run-1',
+          status: 'completed',
+          prompt: '补完苏瑶',
+          answer: '分析完成',
+          trace: [{ step_id: 'tool_mode', kind: 'tool_mode', status: 'completed', summary: '完成' }],
+          evidence: [{
+            evidence_id: 'ev-1',
+            source_type: 'chapter_excerpt',
+            source_ref: { chapter_id: 11, chapter_number: 7, start_pos: 10, end_pos: 80 },
+            title: '第7章',
+            excerpt: '证据',
+            why_relevant: '相关',
+            pack_id: 'pk_ch_11',
+            source_refs: [{ type: 'chapter', chapter_id: 11, chapter_number: 7, start_pos: 10, end_pos: 80 }],
+            anchor_terms: ['帝国', '军团'],
+            support_count: 2,
+            preview_excerpt: '证据预览',
+            expanded: true,
+          }],
+          suggestions: [{
+            suggestion_id: 'sg-1',
+            kind: 'update_entity',
+            title: '补完实体',
+            summary: '补全描述',
+            evidence_ids: ['ev-1'],
+            target: { resource: 'entity', resource_id: 101, label: '苏瑶', tab: 'entities', entity_id: 101 },
+            preview: {
+              target_label: '苏瑶',
+              summary: '补全描述',
+              field_deltas: [{ field: 'description', label: '描述', before: null, after: '新的描述' }],
+              evidence_quotes: ['证据'],
+              actionable: true,
+            },
+            apply: { type: 'update_entity', entity_id: 101, data: { description: '新的描述' } },
+            status: 'pending',
+          }],
+          error: null,
+        }),
+        { status: 200 },
+      ),
+    )
+
+    const result = await copilotApi.pollRun(1, 'session-1', 'run-1')
+    expect(result.status).toBe('completed')
+    expect(result.evidence[0]?.source_ref?.chapter_number).toBe(7)
+    expect(result.evidence[0]?.pack_id).toBe('pk_ch_11')
+    expect(result.evidence[0]?.expanded).toBe(true)
+    expect(result.suggestions[0]?.target.tab).toBe('entities')
+    expect(result.suggestions[0]?.preview.actionable).toBe(true)
+  })
+
+  it('rejects malformed copilot run payloads at the api trust boundary', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          run_id: 'run-1',
+          status: 'mystery-status',
+          prompt: '补完苏瑶',
+          trace: [],
+          evidence: [],
+          suggestions: [],
+        }),
+        { status: 200 },
+      ),
+    )
+
+    await expect(copilotApi.pollRun(1, 'session-1', 'run-1')).rejects.toThrow(/Invalid API response shape/)
+  })
+
+  it('parses copilot run history lists into trusted domain types', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            run_id: 'run-1',
+            status: 'completed',
+            prompt: '先总结苏瑶',
+            answer: '第一轮回答',
+            trace: [],
+            evidence: [],
+            suggestions: [],
+            error: null,
+          },
+          {
+            run_id: 'run-2',
+            status: 'completed',
+            prompt: '继续分析宗门',
+            answer: '第二轮回答',
+            trace: [],
+            evidence: [],
+            suggestions: [],
+            error: null,
+          },
+        ]),
+        { status: 200 },
+      ),
+    )
+
+    const result = await copilotApi.listRuns(1, 'session-1')
+    expect(result).toHaveLength(2)
+    expect(result[0]?.run_id).toBe('run-1')
+    expect(result[1]?.answer).toBe('第二轮回答')
   })
 })

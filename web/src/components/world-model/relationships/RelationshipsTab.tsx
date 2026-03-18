@@ -18,6 +18,7 @@ function RelationshipsGraphSection({
   onUpdate,
   onConfirm,
   onDelete,
+  selectedRelationshipId,
 }: {
   centerId: number
   relationships: WorldRelationship[]
@@ -26,9 +27,23 @@ function RelationshipsGraphSection({
   onUpdate: (relId: number, data: UpdateRelationshipRequest) => void
   onConfirm: (relId: number) => void
   onDelete: (relId: number) => void
+  selectedRelationshipId?: number | null
 }) {
   const [selectedRelId, setSelectedRelId] = useState<number | null>(null)
-  const selectedRel = selectedRelId ? (relationships.find((r) => r.id === selectedRelId) ?? null) : null
+
+  useEffect(() => {
+    setSelectedRelId(selectedRelationshipId ?? null)
+  }, [selectedRelationshipId])
+
+  useEffect(() => {
+    if (selectedRelId == null) return
+    if (relationships.some((relationship) => relationship.id === selectedRelId)) return
+    setSelectedRelId(null)
+  }, [selectedRelId, relationships])
+
+  const effectiveSelectedRel = selectedRelId
+    ? (relationships.find((r) => r.id === selectedRelId) ?? null)
+    : null
 
   return (
     <>
@@ -39,13 +54,13 @@ function RelationshipsGraphSection({
           entities={entities}
           onSelectEntity={onSelectEntity}
           onSelectEdge={(rel) => setSelectedRelId(rel.id)}
-          selectedRelId={selectedRel?.id ?? null}
+          selectedRelId={selectedRelId}
           onClearSelection={() => setSelectedRelId(null)}
         />
       </div>
       <RelationshipInspector
-        key={selectedRel?.id ?? 'none'}
-        rel={selectedRel}
+        key={effectiveSelectedRel?.id ?? 'none'}
+        rel={effectiveSelectedRel}
         entities={entities}
         onUpdate={onUpdate}
         onConfirm={onConfirm}
@@ -59,12 +74,14 @@ export function RelationshipsTab({
   novelId,
   selectedEntityId,
   onSelectEntity,
+  selectedRelationshipId,
   creating: creatingProp,
   onCreatingChange,
 }: {
   novelId: number
   selectedEntityId: number | null
   onSelectEntity: (id: number) => void
+  selectedRelationshipId?: number | null
   creating?: boolean
   onCreatingChange?: (open: boolean) => void
 }) {
@@ -158,6 +175,7 @@ export function RelationshipsTab({
           onUpdate={handleUpdate}
           onConfirm={handleConfirm}
           onDelete={handleDelete}
+          selectedRelationshipId={selectedRelationshipId}
         />
       </div>
       <BottomSheet open={creating} onClose={() => setCreating(false)}>

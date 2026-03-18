@@ -21,7 +21,7 @@ type MockWorldEntity = {
 }
 
 test.describe('World onboarding + world generation (mock)', () => {
-  test('NovelDetailPage shows onboarding when world is empty; dismissal persists', async ({ page }) => {
+  test('Studio shows onboarding when world is empty; dismissal persists', async ({ page }) => {
     await mockAllApiRoutes(page)
 
     await page.goto('/novel/1')
@@ -33,6 +33,13 @@ test.describe('World onboarding + world generation (mock)', () => {
     // Back to novel detail: onboarding stays dismissed (localStorage per novel).
     await page.goto('/novel/1')
     await expect(page.getByTestId('world-onboarding')).not.toBeVisible()
+    await expect(page.getByTestId('studio-assistant-rail')).toBeVisible()
+    await expect(page.getByTestId('world-build-panel')).toBeVisible()
+    await expect(page.getByTestId('studio-rail-continuation')).toBeVisible()
+
+    await page.getByTestId('novel-copilot-trigger').click()
+    await expect(page.getByTestId('novel-copilot-drawer')).toBeVisible()
+    await expect(page.getByTestId('studio-assistant-rail')).toHaveCount(0)
   })
 
   test('from settings generation → draft review → confirm → entity appears', async ({ page }) => {
@@ -114,7 +121,7 @@ test.describe('World onboarding + world generation (mock)', () => {
 
     // Entity should appear in the Entities sidebar list after confirmation.
     await page.getByTestId('tab-entities').click()
-    await expect(page.getByTestId('entity-sidebar').getByRole('button', { name: '测试角色' })).toBeVisible()
+    await expect(page.getByTestId('entity-navigator').getByRole('button', { name: '测试角色' })).toBeVisible()
   })
 
   test('generation error shows inline in dialog', async ({ page }) => {
@@ -133,16 +140,16 @@ test.describe('World onboarding + world generation (mock)', () => {
     await expect(page.getByTestId('world-gen-error')).toBeVisible()
   })
 
-  test('WorldModel sidebars all show the unified build section', async ({ page }) => {
+  test('Atlas sidebars all show the unified build section', async ({ page }) => {
     await mockAllApiRoutes(page)
 
     await page.goto('/world/1')
-    await expect(page.getByTestId('world-build-section')).toBeVisible()
+    await expect(page.getByTestId('world-build-panel')).toBeVisible()
 
     await page.getByTestId('tab-entities').click()
-    await expect(page.getByTestId('world-build-section')).toBeVisible()
+    await expect(page.getByTestId('world-build-panel')).toBeVisible()
 
     await page.getByTestId('tab-relationships').click()
-    await expect(page.getByTestId('world-build-section')).toBeVisible()
+    await expect(page.getByTestId('world-build-panel')).toBeVisible()
   })
 })

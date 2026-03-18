@@ -59,7 +59,8 @@ test('import → enter writing desk → continue → adopt', async ({ page }) =>
 
   // New novels are empty-world by default; onboarding replaces the chapter UI until dismissed.
   const onboarding = page.getByTestId('world-onboarding')
-  const chapterBtn = page.getByRole('button', { name: /第\s*1\s*章/ })
+  const chapterList = page.getByTestId('studio-rail-chapters')
+  const chapterBtn = chapterList.getByRole('button', { name: /第\s*1\s*章/ })
   await Promise.any([
     onboarding.waitFor({ state: 'visible', timeout: 15_000 }),
     chapterBtn.waitFor({ state: 'visible', timeout: 15_000 }),
@@ -76,8 +77,8 @@ test('import → enter writing desk → continue → adopt', async ({ page }) =>
   await expect(chapterBtn).not.toContainText('第一章')
 
   // Enter writing desk
-  await page.getByTestId('novel-continue-button').click()
-  await expect(page).toHaveURL(new RegExp(`/novel/${novelId}/chapter/1/write$`))
+  await page.getByTestId('studio-rail-continuation').click()
+  await expect(page).toHaveURL(new RegExp(`/novel/${novelId}\\?stage=write$`))
   await expect(page.getByText('续写设置')).toBeVisible()
 
   // Mock the LLM streaming endpoint: deterministic NDJSON, no real model calls.
@@ -108,9 +109,9 @@ test('import → enter writing desk → continue → adopt', async ({ page }) =>
     route.fulfill({ status: 200, body: ndjson, headers: { 'content-type': 'application/x-ndjson' } }),
   )
 
-  // Generate continuation (navigates to results page).
-  await page.getByTestId('workspace-generate-button').click()
-  await expect(page).toHaveURL(new RegExp(`/novel/${novelId}/chapter/1/results`), { timeout: 15_000 })
+  // Generate continuation (navigates to the canonical in-shell Studio results route).
+  await page.getByTestId('studio-generate-button').click()
+  await expect(page).toHaveURL(new RegExp(`/novel/${novelId}\\?stage=results&chapter=1$`), { timeout: 15_000 })
 
   // Wait until streaming completes and adopting is enabled.
   const adoptBtn = page.getByTestId('results-adopt-button')
@@ -119,7 +120,7 @@ test('import → enter writing desk → continue → adopt', async ({ page }) =>
 
   // Should return to novel detail and a new chapter should appear.
   await expect(page).toHaveURL(new RegExp(`/novel/${novelId}$`), { timeout: 15_000 })
-  await expect(page.getByRole('button', { name: /第\s*2\s*章/ })).toBeVisible({ timeout: 15_000 })
+  await expect(chapterList.getByRole('button', { name: /第\s*2\s*章/ })).toBeVisible({ timeout: 15_000 })
 })
 
 test('import supports 30MB txt (boundary)', async ({ page }) => {
@@ -154,7 +155,8 @@ test('import supports 30MB txt (boundary)', async ({ page }) => {
 
   // Dismiss empty-world onboarding so the chapter sidebar is visible.
   const onboarding = page.getByTestId('world-onboarding')
-  const chapterCount = page.getByText(/共\s*2\s*章/)
+  const chapterList = page.getByTestId('studio-rail-chapters')
+  const chapterCount = chapterList.getByText(/共\s*2\s*章/)
   await Promise.any([
     onboarding.waitFor({ state: 'visible', timeout: 30_000 }),
     chapterCount.waitFor({ state: 'visible', timeout: 30_000 }),
@@ -169,5 +171,5 @@ test('import supports 30MB txt (boundary)', async ({ page }) => {
   // Parser should split into two chapters, but the page should remain responsive
   // (first chapter content is small).
   await expect(chapterCount).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByRole('button', { name: /第\s*1\s*章/ })).toBeVisible()
+  await expect(chapterList.getByRole('button', { name: /第\s*1\s*章/ })).toBeVisible()
 })

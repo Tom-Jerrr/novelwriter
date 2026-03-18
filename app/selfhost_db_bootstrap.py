@@ -33,6 +33,7 @@ from app.models import (  # noqa: F401 - register models with Base.metadata
 logger = logging.getLogger(__name__)
 
 _HEAD_REVISION = "head"
+_PRE_NOVEL_LANGUAGE_REVISION = "022"
 _CORE_TABLES = {"novels", "chapters"}
 _LEGACY_TABLES = {
     "narrative_events",
@@ -46,7 +47,7 @@ _LEGACY_TABLES = {
     "plot_beats",
 }
 _REQUIRED_SCHEMA_COLUMNS: dict[str, set[str]] = {
-    "novels": {"owner_id", "window_index"},
+    "novels": {"owner_id", "window_index", "language"},
     "world_entities": {"origin", "worldpack_pack_id", "worldpack_key"},
     "world_entity_attributes": {"surface", "origin", "worldpack_pack_id"},
     "world_relationships": {"origin", "worldpack_pack_id", "label_canonical"},
@@ -55,6 +56,14 @@ _REQUIRED_SCHEMA_COLUMNS: dict[str, set[str]] = {
     "bootstrap_jobs": {"mode", "draft_policy", "initialized"},
     "user_events": {"user_id", "event", "created_at"},
 }
+_UNVERSIONED_AUTO_UPGRADE_BASELINES: tuple[tuple[str, dict[str, set[str]]], ...] = (
+    (
+        _PRE_NOVEL_LANGUAGE_REVISION,
+        {
+            "novels": {"language"},
+        },
+    ),
+)
 
 
 def _alembic_config(*, db_url: str, ini_path: str | Path = "alembic.ini") -> Config:
@@ -100,6 +109,22 @@ def _reset_incomplete_bootstrap(bind) -> None:
     reflected.drop_all(bind=bind)
 
 
+def _matching_unversioned_upgrade_baseline(missing_columns: dict[str, set[str]]) -> str | None:
+    for baseline_revision, allowed_missing in _UNVERSIONED_AUTO_UPGRADE_BASELINES:
+        unexpected_missing = {
+            table_name: columns - allowed_missing.get(table_name, set())
+            for table_name, columns in missing_columns.items()
+            if columns - allowed_missing.get(table_name, set())
+        }
+        if unexpected_missing:
+            continue
+
+        if all(allowed_missing.get(table_name, set()) <= missing_columns.get(table_name, set()) for table_name in allowed_missing):
+            return baseline_revision
+
+    return None
+
+
 def ensure_selfhost_database_ready(
     *,
     db_engine: Engine,
@@ -111,6 +136,10 @@ def ensure_selfhost_database_ready(
 ) -> str:
     stamp = stamp_fn or command.stamp
     upgrade = upgrade_fn or command.upgrade
+    config = _alembic_config(db_url=db_url, ini_path=ini_path)
+    stamp_revision: str | None = None
+    should_upgrade = False
+    result = "upgraded"
 
     with db_engine.begin() as bind:
         tables = _user_tables(bind)
@@ -121,26 +150,40 @@ def ensure_selfhost_database_ready(
             )
             _reset_incomplete_bootstrap(bind)
             metadata.create_all(bind=bind)
-            stamp(_alembic_config(db_url=db_url, ini_path=ini_path), _HEAD_REVISION)
-            return "bootstrapped"
-
-        if "alembic_version" not in tables:
+            stamp_revision = _HEAD_REVISION
+            result = "bootstrapped"
+        elif "alembic_version" not in tables:
             missing_columns = _missing_required_columns(bind)
-            if missing_columns:
-                raise RuntimeError(
-                    "Database has application tables but no alembic_version table, and it does not match "
-                    "the current schema closely enough to auto-stamp safely. Missing columns: "
-                    f"{missing_columns}. Back up the database, then rebuild or migrate it manually."
+            if not missing_columns:
+                logger.warning(
+                    "Database has current application tables but no alembic_version; stamping Alembic head."
                 )
+                stamp_revision = _HEAD_REVISION
+                result = "stamped"
+            else:
+                baseline_revision = _matching_unversioned_upgrade_baseline(missing_columns)
+                if baseline_revision is None:
+                    raise RuntimeError(
+                        "Database has application tables but no alembic_version table, and it does not match "
+                        "the current schema closely enough to auto-stamp safely. Missing columns: "
+                        f"{missing_columns}. Back up the database, then rebuild or migrate it manually."
+                    )
 
-            logger.warning(
-                "Database has current application tables but no alembic_version; stamping Alembic head."
-            )
-            stamp(_alembic_config(db_url=db_url, ini_path=ini_path), _HEAD_REVISION)
-            return "stamped"
+                logger.warning(
+                    "Database has application tables but no alembic_version; stamping Alembic %s then upgrading "
+                    "to head to recover additive schema changes.",
+                    baseline_revision,
+                )
+                stamp_revision = baseline_revision
+                should_upgrade = True
+        else:
+            should_upgrade = True
 
-    upgrade(_alembic_config(db_url=db_url, ini_path=ini_path), _HEAD_REVISION)
-    return "upgraded"
+    if stamp_revision is not None:
+        stamp(config, stamp_revision)
+    if should_upgrade:
+        upgrade(config, _HEAD_REVISION)
+    return result
 
 
 def main() -> None:

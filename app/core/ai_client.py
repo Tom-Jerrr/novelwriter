@@ -1,4 +1,5 @@
-from typing import Literal, Type, TypeVar
+from typing import Any, Literal, Type, TypeVar
+from dataclasses import dataclass, field
 import json
 import os
 import logging
@@ -29,6 +30,26 @@ class StructuredOutputParseError(ValueError):
         super().__init__(message)
         self.max_retries = max_retries
         self.last_error = last_error
+
+
+class ToolCallUnsupportedError(RuntimeError):
+    """Raised when the LLM provider does not support tool/function calling."""
+
+
+@dataclass(slots=True)
+class ToolCall:
+    id: str
+    name: str
+    arguments: str  # raw JSON string
+
+
+@dataclass(slots=True)
+class ToolLLMResponse:
+    content: str | None
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    finish_reason: str | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 # Estimated cost per 1M tokens (input, output) in USD.
 #
@@ -134,6 +155,31 @@ def _stream_options_unsupported(exc: Exception) -> bool:
             "invalid",
             "unsupported",
             "not supported",
+        )
+    )
+
+
+def _tool_call_unsupported(exc: Exception) -> bool:
+    """Return True if a provider/gateway rejects the `tools` parameter."""
+    status_code = getattr(exc, "status_code", None)
+    if status_code not in {None, 400, 422}:
+        return False
+
+    message = str(exc).lower()
+    if "tool" not in message and "function" not in message:
+        return False
+
+    return any(
+        hint in message
+        for hint in (
+            "unknown",
+            "unrecognized",
+            "unexpected",
+            "not permitted",
+            "invalid",
+            "unsupported",
+            "not supported",
+            "does not support",
         )
     )
 
@@ -303,6 +349,84 @@ class AIClient:
                 finish_reason,
                 extra={"base_url": config["base_url"], "model": config["model"]},
             )
+
+    async def generate_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_tokens: int = 4000,
+        temperature: float = 0.4,
+        role: AgentRole = "default",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
+        billing_source_hint: str | None = None,
+        user_id: int | None = None,
+        tool_choice: str | None = None,
+    ) -> ToolLLMResponse:
+        """Single-turn LLM call with tool definitions. Returns ToolLLMResponse.
+
+        Raises ToolCallUnsupportedError if the provider rejects the tools parameter.
+        """
+        usage_billing_source = _resolve_billing_source(
+            billing_source_hint,
+            using_request_override=bool(base_url and api_key and model),
+        )
+        ensure_ai_available_fresh_session(billing_source=usage_billing_source)
+        config = self._resolve_config(base_url, api_key, model)
+        client = AsyncOpenAI(
+            base_url=config["base_url"],
+            api_key=config["api_key"],
+        )
+
+        request_kwargs: dict[str, Any] = {
+            "model": config["model"],
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        if tools:
+            request_kwargs["tools"] = tools
+        if tool_choice is not None:
+            request_kwargs["tool_choice"] = tool_choice
+
+        try:
+            response = await client.chat.completions.create(**request_kwargs)
+        except Exception as exc:
+            if _tool_call_unsupported(exc):
+                raise ToolCallUnsupportedError(str(exc)) from exc
+            raise
+
+        if response.usage:
+            _record_usage(
+                config["model"],
+                response.usage.prompt_tokens,
+                response.usage.completion_tokens,
+                node_name=role,
+                user_id=user_id,
+                billing_source=usage_billing_source,
+            )
+
+        choice = response.choices[0] if response.choices else None
+        content = choice.message.content if choice else None
+        finish_reason = choice.finish_reason if choice else None
+
+        tool_calls: list[ToolCall] = []
+        if choice and choice.message.tool_calls:
+            for tc in choice.message.tool_calls:
+                tool_calls.append(ToolCall(
+                    id=tc.id,
+                    name=tc.function.name,
+                    arguments=tc.function.arguments,
+                ))
+
+        return ToolLLMResponse(
+            content=content,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            prompt_tokens=response.usage.prompt_tokens if response.usage else 0,
+            completion_tokens=response.usage.completion_tokens if response.usage else 0,
+        )
 
     async def generate_structured(
         self,

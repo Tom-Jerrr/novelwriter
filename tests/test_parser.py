@@ -65,6 +65,16 @@ def test_no_chapter_markers():
         os.unlink(path)
 
 
+def test_no_chapter_markers_uses_language_localized_fallback_title():
+    path = _write_tmp("これは章見出しのない本文です。")
+    try:
+        result = parse_novel_file(path, language="ja")
+        assert len(result) == 1
+        assert result[0][1] == "第1章"
+    finally:
+        os.unlink(path)
+
+
 def test_chinese_chapter_format():
     content = "第一章 开端\n这是第一章的内容。\n第二章 发展\n这是第二章的内容。\n"
     path = _write_tmp(content)
@@ -89,6 +99,45 @@ def test_english_chapter_format():
         assert len(result) == 2
         assert "Chapter 1" in result[0][1]
         assert "First chapter content" in result[0][2]
+    finally:
+        os.unlink(path)
+
+
+def test_english_prologue_and_chapter_format():
+    content = "Prologue\nOpening scene.\nChapter II Middle\nSecond chapter content.\n"
+    path = _write_tmp(content)
+    try:
+        result = parse_novel_file(path, language="en")
+        assert len(result) == 2
+        assert result[0][1] == "Prologue"
+        assert "Opening scene" in result[0][2]
+        assert "Chapter II" in result[1][1]
+    finally:
+        os.unlink(path)
+
+
+def test_japanese_chapter_format():
+    content = "プロローグ\n始まり。\n第1話 出会い\n本文。\n"
+    path = _write_tmp(content)
+    try:
+        result = parse_novel_file(path, language="ja")
+        assert len(result) == 2
+        assert result[0][1] == "プロローグ"
+        assert "始まり" in result[0][2]
+        assert "第1話" in result[1][1]
+    finally:
+        os.unlink(path)
+
+
+def test_korean_chapter_format():
+    content = "프롤로그\n시작이다.\n제1장 만남\n본문이다.\n"
+    path = _write_tmp(content)
+    try:
+        result = parse_novel_file(path, language="ko")
+        assert len(result) == 2
+        assert result[0][1] == "프롤로그"
+        assert "시작이다" in result[0][2]
+        assert "제1장" in result[1][1]
     finally:
         os.unlink(path)
 

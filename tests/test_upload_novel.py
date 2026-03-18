@@ -67,6 +67,48 @@ def _novel_txt_bytes() -> bytes:
     return text.encode("utf-8")
 
 
+def _english_novel_txt_bytes() -> bytes:
+    text = "\n".join(
+        [
+            "Chapter 1 Beginning",
+            "Alice walked into the city.",
+            "",
+            "Chapter 2 Return",
+            "Bob returned home.",
+            "",
+        ]
+    )
+    return text.encode("utf-8")
+
+
+def _japanese_novel_txt_bytes() -> bytes:
+    text = "\n".join(
+        [
+            "プロローグ",
+            "勇者は城へ向かった。",
+            "",
+            "第1話 出会い",
+            "アリスは町で彼を待っていた。",
+            "",
+        ]
+    )
+    return text.encode("utf-8")
+
+
+def _korean_novel_txt_bytes() -> bytes:
+    text = "\n".join(
+        [
+            "프롤로그",
+            "민수는 집으로 돌아갔다.",
+            "",
+            "제1장 만남",
+            "지현은 역 앞에서 기다리고 있었다.",
+            "",
+        ]
+    )
+    return text.encode("utf-8")
+
+
 class TestUploadNovel:
     def test_selfhost_upload_persists_novel_and_chapters(self, db, tmp_path, monkeypatch):
         from app.api import novels as novels_api
@@ -104,6 +146,7 @@ class TestUploadNovel:
         assert novel is not None
         assert novel.title == "T"
         assert novel.author == "A"
+        assert novel.language == "zh"
         assert novel.owner_id == user.id
 
         # File path is persisted and should point into the isolated upload dir.
@@ -120,6 +163,217 @@ class TestUploadNovel:
         assert [ch.chapter_number for ch in chapters] == [1, 2]
         assert chapters[0].title.startswith("第一章")
         assert "第一章内容" in chapters[0].content
+
+    def test_upload_normalizes_explicit_language(self, db, tmp_path, monkeypatch):
+        from app.api import novels as novels_api
+        from app.core.auth import get_current_user_or_default
+
+        user = User(id=1, username="u", hashed_password="x", role="admin", is_active=True)
+        db.add(user)
+        db.commit()
+
+        upload_dir = tmp_path / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(novels_api, "UPLOAD_DIR", upload_dir)
+
+        app = _make_app(db, novels_api.router)
+        app.dependency_overrides[get_current_user_or_default] = lambda: user
+
+        with TestClient(app) as c:
+            resp = c.post(
+                "/api/novels/upload",
+                files={"file": ("novel.txt", _novel_txt_bytes(), "text/plain")},
+                data={
+                    "title": "T",
+                    "author": "A",
+                    "language": "EN_US",
+                    "consent_acknowledged": "true",
+                    "consent_version": novels_api.UPLOAD_CONSENT_VERSION,
+                },
+            )
+
+        assert resp.status_code == 200
+        novel = db.get(Novel, resp.json()["novel_id"])
+        assert novel is not None
+        assert novel.language == "en-us"
+
+    def test_upload_auto_detects_english_language_when_omitted(self, db, tmp_path, monkeypatch):
+        from app.api import novels as novels_api
+        from app.core.auth import get_current_user_or_default
+
+        user = User(id=1, username="u", hashed_password="x", role="admin", is_active=True)
+        db.add(user)
+        db.commit()
+
+        upload_dir = tmp_path / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(novels_api, "UPLOAD_DIR", upload_dir)
+
+        app = _make_app(db, novels_api.router)
+        app.dependency_overrides[get_current_user_or_default] = lambda: user
+
+        with TestClient(app) as c:
+            resp = c.post(
+                "/api/novels/upload",
+                files={"file": ("novel.txt", _english_novel_txt_bytes(), "text/plain")},
+                data={
+                    "title": "T",
+                    "author": "A",
+                    "consent_acknowledged": "true",
+                    "consent_version": novels_api.UPLOAD_CONSENT_VERSION,
+                },
+            )
+
+        assert resp.status_code == 200
+        novel = db.get(Novel, resp.json()["novel_id"])
+        assert novel is not None
+        assert novel.language == "en"
+
+    def test_upload_auto_detects_japanese_language_when_omitted(self, db, tmp_path, monkeypatch):
+        from app.api import novels as novels_api
+        from app.core.auth import get_current_user_or_default
+
+        user = User(id=1, username="u", hashed_password="x", role="admin", is_active=True)
+        db.add(user)
+        db.commit()
+
+        upload_dir = tmp_path / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(novels_api, "UPLOAD_DIR", upload_dir)
+
+        app = _make_app(db, novels_api.router)
+        app.dependency_overrides[get_current_user_or_default] = lambda: user
+
+        with TestClient(app) as c:
+            resp = c.post(
+                "/api/novels/upload",
+                files={"file": ("novel.txt", _japanese_novel_txt_bytes(), "text/plain")},
+                data={
+                    "title": "T",
+                    "author": "A",
+                    "consent_acknowledged": "true",
+                    "consent_version": novels_api.UPLOAD_CONSENT_VERSION,
+                },
+            )
+
+        assert resp.status_code == 200
+        novel = db.get(Novel, resp.json()["novel_id"])
+        assert novel is not None
+        assert novel.language == "ja"
+
+    def test_upload_auto_detects_korean_language_when_omitted(self, db, tmp_path, monkeypatch):
+        from app.api import novels as novels_api
+        from app.core.auth import get_current_user_or_default
+
+        user = User(id=1, username="u", hashed_password="x", role="admin", is_active=True)
+        db.add(user)
+        db.commit()
+
+        upload_dir = tmp_path / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(novels_api, "UPLOAD_DIR", upload_dir)
+
+        app = _make_app(db, novels_api.router)
+        app.dependency_overrides[get_current_user_or_default] = lambda: user
+
+        with TestClient(app) as c:
+            resp = c.post(
+                "/api/novels/upload",
+                files={"file": ("novel.txt", _korean_novel_txt_bytes(), "text/plain")},
+                data={
+                    "title": "T",
+                    "author": "A",
+                    "consent_acknowledged": "true",
+                    "consent_version": novels_api.UPLOAD_CONSENT_VERSION,
+                },
+            )
+
+        assert resp.status_code == 200
+        novel = db.get(Novel, resp.json()["novel_id"])
+        assert novel is not None
+        assert novel.language == "ko"
+
+    def test_upload_passes_normalized_language_to_parser(self, db, tmp_path, monkeypatch):
+        from app.api import novels as novels_api
+        from app.core.auth import get_current_user_or_default
+
+        user = User(id=1, username="u", hashed_password="x", role="admin", is_active=True)
+        db.add(user)
+        db.commit()
+
+        upload_dir = tmp_path / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(novels_api, "UPLOAD_DIR", upload_dir)
+
+        seen: dict[str, str | None] = {"language": None}
+
+        def fake_parse(path: str, *, language: str | None = None):
+            seen["language"] = language
+            return [(1, "Chapter 1", "content")]
+
+        monkeypatch.setattr(novels_api, "parse_novel_file", fake_parse)
+
+        app = _make_app(db, novels_api.router)
+        app.dependency_overrides[get_current_user_or_default] = lambda: user
+
+        with TestClient(app) as c:
+            resp = c.post(
+                "/api/novels/upload",
+                files={"file": ("novel.txt", b"plain body", "text/plain")},
+                data={
+                    "title": "T",
+                    "author": "A",
+                    "language": "JA_JP",
+                    "consent_acknowledged": "true",
+                    "consent_version": novels_api.UPLOAD_CONSENT_VERSION,
+                },
+            )
+
+        assert resp.status_code == 200
+        assert seen["language"] == "ja-jp"
+
+    def test_upload_passes_detected_language_to_parser_when_language_omitted(self, db, tmp_path, monkeypatch):
+        from app.api import novels as novels_api
+        from app.core.auth import get_current_user_or_default
+
+        user = User(id=1, username="u", hashed_password="x", role="admin", is_active=True)
+        db.add(user)
+        db.commit()
+
+        upload_dir = tmp_path / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(novels_api, "UPLOAD_DIR", upload_dir)
+
+        seen: dict[str, str | None] = {"language": None}
+
+        def fake_read_text(path: str):
+            assert path.endswith(".txt")
+            return "Chapter 1 Beginning\nAlice walked home."
+
+        def fake_parse(path: str, *, language: str | None = None):
+            seen["language"] = language
+            return [(1, "Chapter 1", "content")]
+
+        monkeypatch.setattr(novels_api, "read_novel_file_text", fake_read_text)
+        monkeypatch.setattr(novels_api, "parse_novel_file", fake_parse)
+
+        app = _make_app(db, novels_api.router)
+        app.dependency_overrides[get_current_user_or_default] = lambda: user
+
+        with TestClient(app) as c:
+            resp = c.post(
+                "/api/novels/upload",
+                files={"file": ("novel.txt", b"plain body", "text/plain")},
+                data={
+                    "title": "T",
+                    "author": "A",
+                    "consent_acknowledged": "true",
+                    "consent_version": novels_api.UPLOAD_CONSENT_VERSION,
+                },
+            )
+
+        assert resp.status_code == 200
+        assert seen["language"] == "en"
 
     def test_upload_rejects_non_txt(self, db, tmp_path, monkeypatch):
         from app.api import novels as novels_api

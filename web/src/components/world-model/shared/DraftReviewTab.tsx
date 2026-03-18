@@ -15,21 +15,25 @@ export function DraftReviewTab({
   novelId,
   onOpenEntity,
   onOpenRelationships,
+  onOpenSystem,
   initialKind = 'entities',
   kind: kindProp,
   onKindChange,
   search = '',
   showKindSelector = true,
+  showBatchActions = true,
   highlightId,
 }: {
   novelId: number
   onOpenEntity: (entityId: number) => void
   onOpenRelationships: (entityId: number) => void
+  onOpenSystem?: (systemId: number) => void
   initialKind?: ReviewKind
   kind?: ReviewKind
   onKindChange?: (k: ReviewKind) => void
   search?: string
   showKindSelector?: boolean
+  showBatchActions?: boolean
   highlightId?: number | null
 }) {
   const [kindInternal, setKindInternal] = useState<ReviewKind>(initialKind)
@@ -147,26 +151,28 @@ export function DraftReviewTab({
             </div>
           )}
 
-          <div className="ml-auto flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8"
-              onClick={handleConfirmAll}
-              disabled={idsForKind.length === 0 || confirmEntities.isPending || confirmRelationships.isPending || confirmSystems.isPending}
-            >
-              {LABELS.CONFIRM} 全部 ({idsForKind.length})
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 text-[hsl(var(--color-danger))] hover:text-[hsl(var(--color-danger))]"
-              onClick={handleRejectAll}
-              disabled={idsForKind.length === 0 || rejectEntities.isPending || rejectRelationships.isPending || rejectSystems.isPending}
-            >
-              拒绝 全部 ({idsForKind.length})
-            </Button>
-          </div>
+          {showBatchActions ? (
+            <div className="ml-auto flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8"
+                onClick={handleConfirmAll}
+                disabled={idsForKind.length === 0 || confirmEntities.isPending || confirmRelationships.isPending || confirmSystems.isPending}
+              >
+                {LABELS.CONFIRM} 全部 ({idsForKind.length})
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-[hsl(var(--color-danger))] hover:text-[hsl(var(--color-danger))]"
+                onClick={handleRejectAll}
+                disabled={idsForKind.length === 0 || rejectEntities.isPending || rejectRelationships.isPending || rejectSystems.isPending}
+              >
+                拒绝 全部 ({idsForKind.length})
+              </Button>
+            </div>
+          ) : null}
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto space-y-3">
@@ -212,6 +218,7 @@ export function DraftReviewTab({
                 highlighted={highlightId === s.id}
                 onConfirm={() => confirmSystems.mutate([s.id])}
                 onReject={() => rejectSystems.mutate([s.id])}
+                onOpen={onOpenSystem ? () => onOpenSystem(s.id) : undefined}
               />
             ))
           )}
@@ -254,9 +261,9 @@ function CardShell({ id, highlighted, className, children }: { id?: string; high
     <div
       id={id}
       className={cn(
-        'rounded-xl border bg-[var(--nw-glass-bg)] backdrop-blur-xl p-4 transition-all duration-500',
+        'relative overflow-hidden rounded-xl border bg-[var(--nw-glass-bg)] backdrop-blur-xl p-4 transition-all duration-500',
         highlighted
-          ? 'border-accent/60 ring-2 ring-accent/30 shadow-[0_0_16px_hsl(var(--accent)/0.15)]'
+          ? 'nw-copilot-target-highlight'
           : 'border-[var(--nw-glass-border)]',
         className,
       )}
@@ -380,11 +387,13 @@ function SystemDraftCard({
   highlighted,
   onConfirm,
   onReject,
+  onOpen,
 }: {
   system: WorldSystem
   highlighted?: boolean
   onConfirm: () => void
   onReject: () => void
+  onOpen?: () => void
 }) {
   return (
     <CardShell id={`draft-systems-${system.id}`} highlighted={highlighted}>
@@ -400,6 +409,11 @@ function SystemDraftCard({
           ) : null}
         </div>
         <div className="shrink-0 flex items-center gap-2">
+          {onOpen ? (
+            <Button size="sm" variant="outline" className="h-8" onClick={onOpen}>
+              查看
+            </Button>
+          ) : null}
           <Button size="sm" variant="outline" className="h-8" onClick={onConfirm}>
             {LABELS.CONFIRM}
           </Button>

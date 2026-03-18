@@ -18,7 +18,7 @@ from app.core.auth import (
     check_generation_quota,
 )
 from app.core.llm_request import get_llm_config
-from app.core.world_application import (
+from app.core.world.application import (
     batch_confirm_entities as confirm_entity_drafts,
     batch_confirm_relationships as confirm_relationship_drafts,
     batch_confirm_systems as confirm_system_drafts,
@@ -39,12 +39,12 @@ from app.core.world_application import (
     update_relationship as update_relationship_use_case,
     update_system as update_system_use_case,
 )
-from app.core.world_bootstrap_application import (
+from app.core.world.bootstrap_application import (
     get_bootstrap_status as get_bootstrap_status_use_case,
     is_bootstrap_initialized,
     trigger_bootstrap as trigger_bootstrap_use_case,
 )
-from app.core.world_crud import (
+from app.core.world.crud import (
     WorldCrudDetailError,
     WorldCrudError,
     load_entity,
@@ -52,9 +52,9 @@ from app.core.world_crud import (
     load_relationship,
     load_system,
 )
-from app.core.world_generation_application import generate_world_from_text as generate_world_from_text_use_case
-from app.core.world_use_case_errors import WorldUseCaseDetailError, WorldUseCaseError
-from app.core.worldpack_import import (
+from app.core.world.generation_application import generate_world_from_text as generate_world_from_text_use_case
+from app.core.world.use_case_errors import WorldUseCaseDetailError, WorldUseCaseError
+from app.core.world.worldpack_import import (
     UnsupportedWorldpackSchemaVersionError,
     WorldpackImportConflictError,
     WorldpackImportError,

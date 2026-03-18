@@ -18,13 +18,24 @@ from app.core.text.catalog import (  # noqa: F401  — public API
     get_prompt,
     register_templates,
 )
+from app.core.text.snippets import (  # noqa: F401  — public API
+    SnippetKey,
+    get_snippet,
+    register_snippets,
+)
 
-# Auto-register the default Chinese locale on first import.
+# Auto-register locales on first import.
 import app.core.text.zh  # noqa: F401
+import app.core.text.en  # noqa: F401
+import app.core.text.ja  # noqa: F401
+import app.core.text.ko  # noqa: F401
 
 __all__ = [
     "DEFAULT_LOCALE",
     "PromptKey",
+    "SnippetKey",
     "get_prompt",
+    "get_snippet",
+    "register_snippets",
     "register_templates",
 ]

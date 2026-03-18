@@ -116,7 +116,7 @@ export function BootstrapPanel({ novelId, variant = 'sidebar' }: { novelId: numb
     />
   )
 
-  // ── Sidebar variant: inline row that lives inside WorldBuildSection card ──
+  // ── Sidebar variant: inline row that lives inside WorldBuildPanel card ──
   if (variant === 'sidebar') {
     if (isLoading) {
       return (

@@ -26,7 +26,7 @@ export function BottomSheet({ open, onClose, children }: {
       <div
         className={cn(
           'fixed inset-x-0 bottom-0 z-50 transition-transform duration-200',
-          open ? 'translate-y-0' : 'translate-y-full'
+          open ? 'translate-y-0' : 'translate-y-[calc(100%+120px)]'
         )}
         data-testid="bottom-sheet"
         data-open={open ? 'true' : 'false'}
@@ -34,7 +34,7 @@ export function BottomSheet({ open, onClose, children }: {
         <div className="mx-auto w-full max-w-3xl">
           <GlassSurface
             variant="floating"
-            className="rounded-t-2xl shadow-[0_-30px_80px_rgba(0,0,0,0.65)]"
+            className="rounded-t-2xl shadow-[0_-8px_32px_rgba(0,0,0,0.12)] dark:shadow-[0_-30px_80px_rgba(0,0,0,0.65)]"
           >
             <div className="flex justify-center pt-2">
               <div className="h-1 w-10 rounded-full bg-[hsl(var(--foreground)/0.16)]" />

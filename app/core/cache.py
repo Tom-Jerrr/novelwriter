@@ -10,6 +10,8 @@ to avoid rebuilding Aho-Corasick automata on every request.
 from typing import Dict, Optional, TYPE_CHECKING
 from threading import Lock
 
+__all__ = ["CacheManager", "cache_manager", "invalidate_novel_language_caches"]
+
 if TYPE_CHECKING:
     from app.core.lore_manager import LoreManager
 
@@ -42,3 +44,17 @@ class CacheManager:
 
 
 cache_manager = CacheManager()
+
+
+def invalidate_novel_language_caches(db, novel_id: int) -> None:
+    """Invalidate all caches affected by a Novel.language change.
+
+    Must be called whenever Novel.language is mutated. This ensures:
+    - Lore automaton is rebuilt (keyword language may change)
+    - Window index is rebuilt (tokenizer depends on language)
+    """
+    cache_manager.invalidate_novel(novel_id)
+    from app.models import Novel
+    novel = db.query(Novel).filter(Novel.id == novel_id).first()
+    if novel is not None:
+        novel.window_index = None

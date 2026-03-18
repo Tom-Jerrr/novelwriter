@@ -65,6 +65,7 @@ def novel(db_session):
     novel = Novel(
         title="Test Novel",
         author="Test Author",
+        language="en",
         file_path="/test/path.txt",
         total_chapters=10,
     )
@@ -295,6 +296,7 @@ class TestLorebookAPI:
         other_novel = Novel(
             title="Other Novel",
             author="Other Author",
+            language="en",
             file_path="/test/other.txt",
             total_chapters=1,
         )
@@ -332,6 +334,36 @@ class TestLorebookAPI:
         data = response.json()
         assert len(data["matched_entries"]) == 0
         assert data["context"] == ""
+
+    def test_match_respects_word_boundaries_for_english(self, client, db_session, novel):
+        entry = LoreEntry(
+            novel_id=novel.id,
+            uid=LoreManager.generate_uid(),
+            title="Al",
+            content="Short nickname entry.",
+            entry_type="Character",
+            token_budget=50,
+            priority=1,
+            enabled=True,
+        )
+        db_session.add(entry)
+        db_session.flush()
+        db_session.add(
+            LoreKey(
+                entry_id=entry.id,
+                keyword="Al",
+                is_regex=False,
+                case_sensitive=False,
+            )
+        )
+        db_session.commit()
+
+        response = client.post(
+            f"/api/novels/{novel.id}/lorebook/match?text=Alice arrived."
+        )
+
+        assert response.status_code == 200
+        assert response.json()["matched_entries"] == []
 
     def test_import_character_card_json(self, client, novel):
         """Test importing a JSON character card."""

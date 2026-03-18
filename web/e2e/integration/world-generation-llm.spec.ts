@@ -216,7 +216,7 @@ test.describe('World generation (real LLM, integration)', () => {
 
     // Confirmed entity should appear in Entities tab UI.
     await page.getByTestId('tab-entities').click()
-    const sidebar = page.getByTestId('entity-sidebar')
+    const sidebar = page.getByTestId('entity-navigator')
     await sidebar.getByTestId('entity-search').fill(confirmedName)
     await expect(sidebar.getByRole('button', { name: new RegExp(escapeRegExp(confirmedName)) })).toBeVisible({ timeout: 15_000 })
   })

@@ -8,18 +8,31 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping, Sequence
 
+from app.core.text.snippets import SnippetKey, get_snippet
 
-def format_recent_chapters_for_prompt(recent_chapters: Sequence[Any]) -> str:
+
+def format_recent_chapters_for_prompt(
+    recent_chapters: Sequence[Any],
+    *,
+    locale: str | None = None,
+) -> str:
+    fmt = get_snippet(SnippetKey.CHAPTER_HEADING_FMT, locale)
     return "\n\n".join(
-        f"【Chapter {getattr(ch, 'chapter_number', '')}: {getattr(ch, 'title', '')}】\n"
-        f"{getattr(ch, 'content', '')}"
+        fmt.format(n=getattr(ch, 'chapter_number', ''), title=getattr(ch, 'title', ''))
+        + f"\n{getattr(ch, 'content', '')}"
         for ch in recent_chapters
     )
 
 
-def append_user_instruction_for_relevance(text: str, user_prompt: str | None) -> str:
+def append_user_instruction_for_relevance(
+    text: str,
+    user_prompt: str | None,
+    *,
+    locale: str | None = None,
+) -> str:
     if user_prompt and user_prompt.strip():
-        return text + "\n\n【用户续写指令】\n" + user_prompt.strip()
+        header = get_snippet(SnippetKey.USER_INSTRUCTION_HEADER, locale)
+        return text + f"\n\n{header}\n" + user_prompt.strip()
     return text
 
 
@@ -46,7 +59,7 @@ def extract_narrative_constraints(writer_ctx: Mapping[str, Any]) -> str:
     return f"\n<narrative_constraints>\n{numbered}\n</narrative_constraints>\n"
 
 
-def _render_hierarchy_data(data: Any) -> str:
+def _render_hierarchy_data(data: Any, *, desc_sep: str = ": ") -> str:
     nodes = data.get("nodes") if isinstance(data, dict) else None
     if not isinstance(nodes, list) or not nodes:
         return ""
@@ -61,9 +74,9 @@ def _render_hierarchy_data(data: Any) -> str:
             return
         desc = str(node.get("description") or "").strip()
         indent = "  " * depth
-        line = f"{indent}· {label}"
+        line = f"{indent}\u00b7 {label}"
         if desc:
-            line += f"：{desc}"
+            line += f"{desc_sep}{desc}"
         lines.append(line)
         for child in node.get("children") or []:
             _walk(child, depth + 1)
@@ -73,7 +86,7 @@ def _render_hierarchy_data(data: Any) -> str:
     return "\n".join(lines)
 
 
-def _render_timeline_data(data: Any) -> str:
+def _render_timeline_data(data: Any, *, desc_sep: str = ": ") -> str:
     events = data.get("events") if isinstance(data, dict) else None
     if not isinstance(events, list) or not events:
         return ""
@@ -87,15 +100,15 @@ def _render_timeline_data(data: Any) -> str:
         desc = str(event.get("description") or "").strip()
         if not label:
             continue
-        line = "· "
-        line += f"{date}，{label}" if date else label
+        line = "\u00b7 "
+        line += f"{date}\uff0c{label}" if date else label
         if desc:
-            line += f"：{desc}"
+            line += f"{desc_sep}{desc}"
         lines.append(line)
     return "\n".join(lines)
 
 
-def _render_list_data(data: Any) -> str:
+def _render_list_data(data: Any, *, desc_sep: str = ": ") -> str:
     items = data.get("items") if isinstance(data, dict) else None
     if not isinstance(items, list) or not items:
         return ""
@@ -108,9 +121,9 @@ def _render_list_data(data: Any) -> str:
         desc = str(item.get("description") or "").strip()
         if not label:
             continue
-        line = f"· {label}"
+        line = f"\u00b7 {label}"
         if desc:
-            line += f"：{desc}"
+            line += f"{desc_sep}{desc}"
         lines.append(line)
     return "\n".join(lines)
 
@@ -122,10 +135,10 @@ _SYSTEM_DATA_RENDERERS = {
 }
 
 
-def _render_system_data(display_type: str, data: Any) -> str:
+def _render_system_data(display_type: str, data: Any, *, desc_sep: str = ": ") -> str:
     renderer = _SYSTEM_DATA_RENDERERS.get(display_type)
     if renderer and data:
-        return renderer(data)
+        return renderer(data, desc_sep=desc_sep)
     if data:
         try:
             return json.dumps(data, ensure_ascii=False, sort_keys=True)
@@ -134,12 +147,19 @@ def _render_system_data(display_type: str, data: Any) -> str:
     return ""
 
 
-def format_world_context_for_prompt(writer_ctx: Mapping[str, Any]) -> str:
+def format_world_context_for_prompt(
+    writer_ctx: Mapping[str, Any],
+    *,
+    locale: str | None = None,
+) -> str:
     """Render assemble_writer_context() output into an LLM-friendly text block."""
 
     systems = writer_ctx.get("systems") or []
     entities = writer_ctx.get("entities") or []
     relationships = writer_ctx.get("relationships") or []
+
+    desc_sep = get_snippet(SnippetKey.DESC_SEPARATOR, locale)
+    alias_sep = get_snippet(SnippetKey.ALIAS_SEPARATOR, locale)
 
     id_to_name: dict[int, str] = {}
     for entity in entities:
@@ -151,32 +171,35 @@ def format_world_context_for_prompt(writer_ctx: Mapping[str, Any]) -> str:
     lines: list[str] = []
 
     if systems:
-        lines.append("〈世界体系〉")
+        lines.append(get_snippet(SnippetKey.SECTION_SYSTEMS, locale))
+        unnamed_system = get_snippet(SnippetKey.UNNAMED_SYSTEM, locale)
         for system in systems:
             name = str(system.get("name") or "").strip()
             desc = str(system.get("description") or "").strip()
             display_type = str(system.get("display_type") or "").strip()
-            header = f"- {name}" if name else "- （未命名体系）"
+            header = f"- {name}" if name else f"- {unnamed_system}"
             if desc:
-                header += f"：{desc}"
+                header += f"{desc_sep}{desc}"
             lines.append(header)
 
-            rendered = _render_system_data(display_type, system.get("data"))
+            rendered = _render_system_data(display_type, system.get("data"), desc_sep=desc_sep)
             if rendered:
                 for line in rendered.split("\n"):
                     lines.append(f"  {line}")
 
     if entities:
-        lines.append("〈角色与事物〉")
+        lines.append(get_snippet(SnippetKey.SECTION_ENTITIES, locale))
+        unnamed_entity = get_snippet(SnippetKey.UNNAMED_ENTITY, locale)
+        aliases_label = get_snippet(SnippetKey.ALIASES_LABEL, locale)
         for entity in entities:
             name = str(entity.get("name") or "").strip()
             entity_type = str(entity.get("entity_type") or "").strip()
             desc = str(entity.get("description") or "").strip()
-            header = f"- {name}" if name else "- （未命名实体）"
+            header = f"- {name}" if name else f"- {unnamed_entity}"
             if entity_type:
-                header += f"（{entity_type}）"
+                header += f"({entity_type})"
             if desc:
-                header += f"：{desc}"
+                header += f"{desc_sep}{desc}"
             lines.append(header)
 
             aliases = entity.get("aliases") or []
@@ -188,7 +211,7 @@ def format_world_context_for_prompt(writer_ctx: Mapping[str, Any]) -> str:
                         continue
                     normalized.append(alias)
                 if normalized:
-                    lines.append(f"  别名：{'、'.join(normalized)}")
+                    lines.append(f"  {aliases_label}{alias_sep.join(normalized)}")
 
             attrs = entity.get("attributes") or []
             if isinstance(attrs, list) and attrs:
@@ -196,23 +219,23 @@ def format_world_context_for_prompt(writer_ctx: Mapping[str, Any]) -> str:
                     key = str(attr.get("key") or "").strip()
                     surface = str(attr.get("surface") or "").strip()
                     if key and surface:
-                        lines.append(f"  - {key}：{surface}")
+                        lines.append(f"  - {key}{desc_sep}{surface}")
                     elif key:
                         lines.append(f"  - {key}")
 
     if relationships:
-        lines.append("〈人物关系〉")
+        lines.append(get_snippet(SnippetKey.SECTION_RELATIONSHIPS, locale))
         for relationship in relationships:
             label = str(relationship.get("label") or "").strip()
             desc = str(relationship.get("description") or "").strip()
             src_id = relationship.get("source_id")
             tgt_id = relationship.get("target_id")
-            src = id_to_name.get(int(src_id), str(src_id)) if src_id is not None else "？"
-            tgt = id_to_name.get(int(tgt_id), str(tgt_id)) if tgt_id is not None else "？"
+            src = id_to_name.get(int(src_id), str(src_id)) if src_id is not None else "?"
+            tgt = id_to_name.get(int(tgt_id), str(tgt_id)) if tgt_id is not None else "?"
             line = f"- {src}"
-            line += f" —{label}→ {tgt}" if label else f" → {tgt}"
+            line += f" \u2014{label}\u2192 {tgt}" if label else f" \u2192 {tgt}"
             if desc:
-                line += f"：{desc}"
+                line += f"{desc_sep}{desc}"
             lines.append(line)
 
     return "\n".join(lines).strip()

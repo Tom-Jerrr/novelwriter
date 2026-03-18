@@ -18,7 +18,9 @@ from typing import List, Dict, Optional, Set, Tuple
 
 from sqlalchemy.orm import Session, joinedload
 
+from app.language_policy import LanguagePolicy, get_language_policy
 from app.models import LoreEntry
+from app.models import Novel
 from app.config import get_settings
 
 
@@ -50,7 +52,8 @@ class LoreManager:
         """Initialize LoreManager without db (session-safe for caching)."""
         self.novel_id = novel_id
         self.settings = get_settings()
-        # Case-insensitive keywords use this automaton (lowercased).
+        self._language_policy: Optional[LanguagePolicy] = None
+        # Case-insensitive keywords use this automaton after language-policy normalization.
         self._automaton: Optional[ahocorasick.Automaton] = None
         # Case-sensitive keywords use their own automaton.
         self._automaton_sensitive: Optional[ahocorasick.Automaton] = None
@@ -78,6 +81,8 @@ class LoreManager:
         self._automaton_sensitive = ahocorasick.Automaton()
         self._regex_patterns = []
         self._entry_cache.clear()
+        novel_language = db.query(Novel.language).filter(Novel.id == self.novel_id).scalar()
+        self._language_policy = get_language_policy(novel_language)
 
         entries = (
             db.query(LoreEntry)
@@ -109,7 +114,13 @@ class LoreManager:
                     except re.error:
                         pass
                 else:
-                    keyword = key.keyword if key.case_sensitive else key.keyword.lower()
+                    keyword = (
+                        key.keyword
+                        if key.case_sensitive
+                        else self._language_policy.normalize_for_matching(key.keyword)
+                    )
+                    if not keyword:
+                        continue
                     target_map = sensitive_keywords if key.case_sensitive else insensitive_keywords
                     if keyword not in target_map:
                         target_map[keyword] = []
@@ -150,17 +161,29 @@ class LoreManager:
         if not self._entry_cache:
             return []
 
+        policy = self._language_policy or get_language_policy()
+
         if self._automaton is not None and len(self._automaton) > 0:
-            text_lower = text.lower()
-            for _, values in self._automaton.iter(text_lower):
+            normalized_text = policy.normalize_for_matching(text)
+            for end_idx, values in self._automaton.iter(normalized_text):
                 for entry_id, keyword in values:
+                    start_idx = end_idx - len(policy.normalize_for_matching(keyword)) + 1
+                    if start_idx < 0:
+                        continue
+                    if not policy.match_has_word_boundaries(normalized_text, start_idx, end_idx + 1):
+                        continue
                     if entry_id not in matches:
                         matches[entry_id] = set()
                     matches[entry_id].add(keyword)
 
         if self._automaton_sensitive is not None and len(self._automaton_sensitive) > 0:
-            for _, values in self._automaton_sensitive.iter(text):
+            for end_idx, values in self._automaton_sensitive.iter(text):
                 for entry_id, keyword in values:
+                    start_idx = end_idx - len(keyword) + 1
+                    if start_idx < 0:
+                        continue
+                    if not policy.match_has_word_boundaries(text, start_idx, end_idx + 1):
+                        continue
                     if entry_id not in matches:
                         matches[entry_id] = set()
                     matches[entry_id].add(keyword)
@@ -232,6 +255,7 @@ class LoreManager:
 
     def invalidate_cache(self) -> None:
         """Force rebuild of automaton on next match call."""
+        self._language_policy = None
         self._automaton = None
         self._automaton_sensitive = None
         self._regex_patterns = []

@@ -21,8 +21,11 @@ from app.core.ai_client import ai_client
 from app.core.lore_manager import LoreManager
 from app.core.cache import cache_manager
 from app.core.text import PromptKey, get_prompt
+from app.core.text.snippets import SnippetKey, get_snippet
 from app.config import get_settings, resolve_context_chapters
 from app.core.chapter_numbering import get_next_missing_chapter_number
+from app.language import resolve_prompt_locale
+from app.language_policy import get_language_policy
 
 logger = logging.getLogger(__name__)
 
@@ -55,26 +58,27 @@ def _build_length_guidance(
     target_chars: int | None,
     generation_target_chars: int | None,
     min_ratio: float,
+    *,
+    prompt_locale: str | None = None,
 ) -> str:
     if target_chars:
         min_chars = max(1, math.floor(target_chars * min_ratio))
         prompt_target = generation_target_chars or target_chars
         natural_ceiling = max(prompt_target, math.ceil(target_chars * 1.1))
-        return (
-            f"以约{prompt_target}字为目标完整展开正文，不要过早收束，"
-            f"明显短于约{min_chars}字会显得篇幅不足，可自然上浮到约{natural_ceiling}字，"
-            "最后在完整句子处结束"
+        return get_snippet(SnippetKey.LENGTH_GUIDANCE_TARGET, prompt_locale).format(
+            target=prompt_target, min_chars=min_chars, ceiling=natural_ceiling,
         )
-    return "请把正文写成自然完整的一章，在完整句子处结束。"
+    return get_snippet(SnippetKey.LENGTH_GUIDANCE_DEFAULT, prompt_locale)
 
 
-def _build_system_prompt(length_guidance: str) -> str:
+def _build_system_prompt(length_guidance: str, *, prompt_locale: str) -> str:
+    length_header = get_snippet(SnippetKey.SYSTEM_LENGTH_HEADER, prompt_locale)
+    length_rules = get_snippet(SnippetKey.SYSTEM_LENGTH_RULES, prompt_locale)
     return (
-        f"{get_prompt(PromptKey.SYSTEM)}\n\n"
-        "【长度纪律】\n"
+        f"{get_prompt(PromptKey.SYSTEM, locale=prompt_locale)}\n\n"
+        f"{length_header}\n"
         f"- {length_guidance}\n"
-        "- 直接开始写正文，不要先做分析、提纲或铺垫性说明\n"
-        "- 若篇幅尚未充分展开，不要过早结束"
+        f"{length_rules}"
     )
 
 
@@ -95,33 +99,9 @@ def _compute_max_tokens(
     return default_tokens
 
 
-def _trim_to_target_chars(text: str, target_chars: int) -> str:
-    if target_chars <= 0:
-        return text
-
-    punctuation = "。！？!?…"
-    slice_end = min(len(text), target_chars)
-    window_start = max(0, slice_end - 200)
-
-    trimmed = text[:slice_end].rstrip()
-    if trimmed and trimmed[-1] in punctuation:
-        return trimmed
-
-    candidate = None
-    for idx in range(slice_end, window_start, -1):
-        if text[idx - 1] in punctuation:
-            candidate = idx
-            break
-
-    if candidate is None:
-        for idx in range(slice_end, 0, -1):
-            if text[idx - 1] in punctuation:
-                candidate = idx
-                break
-
-    if candidate is None:
-        return trimmed
-    return text[:candidate].rstrip()
+def _trim_to_target_chars(text: str, target_chars: int, *, language: str | None = None) -> str:
+    policy = get_language_policy(language, sample_text=text)
+    return policy.trim_to_sentence_boundary(text, target_chars)
 
 
 async def generate_outline(
@@ -148,12 +128,21 @@ async def generate_outline(
             f"Ensure the novel has been uploaded and chapters exist in this range."
         )
 
+    novel = db.query(Novel).filter(Novel.id == novel_id).first()
+    if not novel:
+        raise ValueError(
+            f"Novel {novel_id} not found. Please upload a novel first using POST /api/novels/upload."
+        )
+    prompt_locale = resolve_prompt_locale(novel_language=getattr(novel, "language", None))
+
     content = "\n\n".join(
-        f"【第{ch.chapter_number}章：{ch.title}】\n{ch.content[:1000]}..."
+        get_snippet(SnippetKey.CHAPTER_HEADING_FMT, prompt_locale).format(
+            n=ch.chapter_number, title=ch.title,
+        ) + f"\n{ch.content[:1000]}..."
         for ch in chapters
     )
 
-    prompt = get_prompt(PromptKey.OUTLINE).format(
+    prompt = get_prompt(PromptKey.OUTLINE, locale=prompt_locale).format(
         start=chapter_start,
         end=chapter_end,
         content=content,
@@ -161,7 +150,7 @@ async def generate_outline(
 
     outline_text = await ai_client.generate(
         prompt=prompt,
-        system_prompt=get_prompt(PromptKey.SYSTEM),
+        system_prompt=get_prompt(PromptKey.SYSTEM, locale=prompt_locale),
         max_tokens=1000,
     )
 
@@ -206,17 +195,20 @@ async def _build_continuation_prompt(
         token_buffer_ratio=settings.continuation_token_buffer_ratio,
         cap=settings.max_continuation_tokens,
     )
-    length_guidance = _build_length_guidance(
-        target_chars,
-        generation_target_chars,
-        settings.continuation_min_target_ratio,
-    )
 
     novel = db.query(Novel).filter(Novel.id == novel_id).first()
     if not novel:
         raise ValueError(
             f"Novel {novel_id} not found. Please upload a novel first using POST /api/novels/upload."
         )
+    prompt_locale = resolve_prompt_locale(novel_language=getattr(novel, "language", None))
+
+    length_guidance = _build_length_guidance(
+        target_chars,
+        generation_target_chars,
+        settings.continuation_min_target_ratio,
+        prompt_locale=prompt_locale,
+    )
 
     effective_context_chapters = resolve_context_chapters(
         context_chapters,
@@ -244,15 +236,17 @@ async def _build_continuation_prompt(
         .all()
     )
 
+    chapter_heading_fmt = get_snippet(SnippetKey.CHAPTER_HEADING_FMT, prompt_locale)
     recent_content = "\n\n".join(
-        f"【第{ch.chapter_number}章：{ch.title}】\n{ch.content}"
+        chapter_heading_fmt.format(n=ch.chapter_number, title=ch.title) + f"\n{ch.content}"
         for ch in recent_chapters
     )
 
+    outline_heading_fmt = get_snippet(SnippetKey.OUTLINE_HEADING_FMT, prompt_locale)
     outline_content = "\n\n".join(
-        f"【第{o.chapter_start}–{o.chapter_end}章大纲】\n{o.outline_text}"
+        outline_heading_fmt.format(start=o.chapter_start, end=o.chapter_end) + f"\n{o.outline_text}"
         for o in outlines
-    ) if outlines else "暂无大纲。"
+    ) if outlines else get_snippet(SnippetKey.NO_OUTLINE, prompt_locale)
 
     next_chapter = get_next_missing_chapter_number(db, novel_id)
 
@@ -307,7 +301,7 @@ async def _build_continuation_prompt(
 
     constraints_section = (narrative_constraints or "").strip()
 
-    generation_prompt = get_prompt(PromptKey.CONTINUATION).format(
+    generation_prompt = get_prompt(PromptKey.CONTINUATION, locale=prompt_locale).format(
         title=novel.title,
         next_chapter=next_chapter,
         outline=outline_content,
@@ -322,16 +316,18 @@ async def _build_continuation_prompt(
     # the style of the most recently seen text.  Placing the novel prose at the
     # tail of the prompt exploits this inertia so the model's first tokens
     # naturally match the original register.
+    style_anchor = get_snippet(SnippetKey.STYLE_ANCHOR, prompt_locale)
+    continue_instruction = get_snippet(SnippetKey.CONTINUE_INSTRUCTION, prompt_locale).format(n=next_chapter)
     generation_prompt += (
-        "\n你的续写必须在语体、口吻、句式和用词上与下方 <recent_chapters> 完全一致，"
-        "开篇就要无缝衔接原文风格。\n\n"
+        f"\n{style_anchor}\n\n"
         f"<recent_chapters>\n{recent_content}\n</recent_chapters>\n"
-        f"请续写第{next_chapter}章："
+        f"{continue_instruction}"
     )
 
     return generation_prompt, effective_max_tokens, {
         "next_chapter": next_chapter,
-        "system_prompt": _build_system_prompt(length_guidance),
+        "novel_language": getattr(novel, "language", None),
+        "system_prompt": _build_system_prompt(length_guidance, prompt_locale=prompt_locale),
     }
 
 
@@ -385,6 +381,7 @@ async def continue_novel(
         world_debug_summary=world_debug_summary,
     )
     next_chapter = build_info["next_chapter"]
+    novel_language = build_info.get("novel_language")
     system_prompt = build_info["system_prompt"]
 
     # Generate continuations
@@ -406,7 +403,7 @@ async def continue_novel(
         content = _sanitize_continuation_content(content)
 
         if target_chars:
-            content = _trim_to_target_chars(content, target_chars)
+            content = _trim_to_target_chars(content, target_chars, language=novel_language)
 
         continuation = Continuation(
             novel_id=novel_id,
@@ -455,13 +452,16 @@ async def continue_novel_stream(
         world_debug_summary=world_debug_summary,
     )
     next_chapter = build_info["next_chapter"]
+    novel_language = build_info.get("novel_language")
     system_prompt = build_info["system_prompt"]
     llm_kwargs = llm_config or {}
     if temperature is not None:
         llm_kwargs["temperature"] = temperature
 
-    def _error_event(*, code: str, message: str, variant: int | None = None) -> dict:
+    def _error_event(*, code: str, message: str, message_key: str | None = None, variant: int | None = None) -> dict:
         event: dict = {"type": "error", "code": code, "message": message}
+        if message_key is not None:
+            event["message_key"] = message_key
         if variant is not None:
             event["variant"] = int(variant)
         if request_id:
@@ -494,11 +494,11 @@ async def continue_novel_stream(
             request_id,
             novel_id,
         )
-        yield _error_event(code="llm_stream_failed", message="续写生成失败，请重试", variant=0)
+        yield _error_event(code="llm_stream_failed", message="续写生成失败，请重试", message_key="continuation.error.llm_stream_failed", variant=0)
     else:
         full_content = _sanitize_continuation_content(full_content)
         if target_chars:
-            full_content = _trim_to_target_chars(full_content, target_chars)
+            full_content = _trim_to_target_chars(full_content, target_chars, language=novel_language)
 
         continuation = Continuation(
             novel_id=novel_id,
@@ -521,7 +521,7 @@ async def continue_novel_stream(
                 request_id,
                 novel_id,
             )
-            yield _error_event(code="db_persist_failed", message="保存续写结果失败，请重试", variant=0)
+            yield _error_event(code="db_persist_failed", message="保存续写结果失败，请重试", message_key="continuation.error.db_persist_failed", variant=0)
         else:
             continuation_ids.append(int(continuation.id))
             # Include final content so the client can reconcile any trimming/normalization.
@@ -546,7 +546,7 @@ async def continue_novel_stream(
 
                 content = _sanitize_continuation_content(content)
                 if target_chars:
-                    content = _trim_to_target_chars(content, target_chars)
+                    content = _trim_to_target_chars(content, target_chars, language=novel_language)
                 return {"variant": variant_idx, "ok": True, "content": content}
             except Exception:
                 logger.exception(
@@ -564,7 +564,7 @@ async def continue_novel_stream(
         for result in results:
             variant_idx = int(result["variant"])
             if not result.get("ok"):
-                yield _error_event(code="llm_generate_failed", message="续写生成失败，请重试", variant=variant_idx)
+                yield _error_event(code="llm_generate_failed", message="续写生成失败，请重试", message_key="continuation.error.llm_generate_failed", variant=variant_idx)
                 continue
 
             content = str(result["content"])
@@ -590,7 +590,7 @@ async def continue_novel_stream(
                     request_id,
                     novel_id,
                 )
-                yield _error_event(code="db_persist_failed", message="保存续写结果失败，请重试", variant=variant_idx)
+                yield _error_event(code="db_persist_failed", message="保存续写结果失败，请重试", message_key="continuation.error.db_persist_failed", variant=variant_idx)
             else:
                 continuation_ids.append(int(c.id))
                 yield {

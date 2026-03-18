@@ -43,6 +43,7 @@
     --color-vis-hidden: 220 9% 46%;
     --color-mystery: 38 92% 50%;
     --color-status-confirmed: 142 71% 45%;
+    --color-status-relationship: 268 82% 66%;
     --color-status-draft: 38 92% 50%;
     --color-danger: 0 84% 60%;
     --color-warning: 38 92% 50%;
@@ -53,6 +54,42 @@
     --nw-glass-border-hover: #ffffff33;
     --nw-backdrop: #00000066;
     --nw-modal-bg: 230 14% 16%;
+
+    --nw-copilot-overlay-bg: linear-gradient(180deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.3));
+    --nw-copilot-border: rgba(255, 255, 255, 0.08);
+    --nw-copilot-border-strong: rgba(255, 255, 255, 0.14);
+    --nw-copilot-shell-bg:
+      linear-gradient(180deg, rgba(30, 32, 36, 0.65), rgba(20, 22, 26, 0.55) 50%, rgba(15, 17, 20, 0.45));
+    --nw-copilot-shell-shadow: 0 40px 80px rgba(0, 0, 0, 0.6), 0 10px 30px rgba(0, 0, 0, 0.4);
+    --nw-copilot-panel-bg:
+      linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02) 54%, rgba(0, 0, 0, 0.1));
+    --nw-copilot-panel-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), 0 2px 8px rgba(0, 0, 0, 0.15);
+    --nw-copilot-panel-strong-bg:
+      linear-gradient(160deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.04) 55%, hsla(217, 91%, 60%, 0.12));
+    --nw-copilot-panel-strong-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 32px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.15);
+    --nw-copilot-panel-muted-bg: linear-gradient(160deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0.15));
+    --nw-copilot-panel-muted-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    --nw-copilot-pill-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+    --nw-copilot-pill-hover-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.12), hsla(217, 91%, 60%, 0.15));
+    --nw-copilot-pill-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 1px 4px rgba(0, 0, 0, 0.2);
+    --nw-copilot-pill-hover-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 6px 16px rgba(0, 0, 0, 0.3), 0 2px 4px rgba(0, 0, 0, 0.1);
+    --nw-copilot-highlight-line: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), transparent);
+    --nw-copilot-track-bg: rgba(0, 0, 0, 0.3);
+    --nw-copilot-quote-bg: rgba(255, 255, 255, 0.04);
+    --nw-copilot-session-active-bg:
+      linear-gradient(150deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.04) 58%, hsla(217, 91%, 60%, 0.12));
+    --nw-copilot-session-active-shadow: 0 12px 32px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.15);
+    --nw-copilot-session-inactive-bg: linear-gradient(150deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.1));
+    --nw-copilot-session-inactive-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+    --nw-copilot-session-rail-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.1));
+    --nw-copilot-session-rail-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 4px 12px rgba(0, 0, 0, 0.2);
+
+    --nw-copilot-glow-blend: screen;
+    --nw-copilot-glow-op: 0.8;
+    --nw-copilot-glow-1: hsla(217, 91%, 60%, 0.16);
+    --nw-copilot-glow-2: hsla(270, 80%, 65%, 0.12);
+    --nw-copilot-glow-3: hsla(220, 90%, 65%, 0.10);
+    --nw-copilot-glow-4: hsla(217, 91%, 60%, 0.15);
   }
 
   /* Light mode — activated by .light class on <html> */
@@ -92,16 +129,53 @@
     --color-vis-hidden: 220 9% 76%;
     --color-mystery: 38 92% 50%;
     --color-status-confirmed: 142 71% 45%;
+    --color-status-relationship: 268 62% 54%;
     --color-status-draft: 38 92% 50%;
     --color-danger: 0 84% 60%;
     --color-warning: 38 92% 50%;
 
     --nw-glass-bg: #ffffff70;
-    --nw-glass-bg-hover: #ffffff90;
+    --nw-glass-bg-hover: hsla(220, 14%, 92%, 0.80);
     --nw-glass-border: #00000015;
-    --nw-glass-border-hover: #00000025;
+    --nw-glass-border-hover: #00000030;
     --nw-backdrop: #00000033;
     --nw-modal-bg: 0 0% 98%;
+
+    --nw-copilot-overlay-bg: linear-gradient(180deg, rgba(203, 213, 225, 0.08), rgba(148, 163, 184, 0.12));
+    --nw-copilot-border: rgba(15, 23, 42, 0.06);
+    --nw-copilot-border-strong: rgba(15, 23, 42, 0.12);
+    --nw-copilot-shell-bg:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(248, 250, 252, 0.76) 50%, rgba(241, 245, 249, 0.70));
+    --nw-copilot-shell-shadow: 0 32px 72px rgba(15, 23, 42, 0.08), 0 8px 24px rgba(15, 23, 42, 0.04);
+    --nw-copilot-panel-bg:
+      linear-gradient(160deg, rgba(255, 255, 255, 0.8), rgba(248, 250, 252, 0.7) 54%, rgba(241, 245, 249, 0.65));
+    --nw-copilot-panel-shadow: 0 8px 24px rgba(148, 163, 184, 0.08), 0 2px 8px rgba(148, 163, 184, 0.04);
+    --nw-copilot-panel-strong-bg:
+      linear-gradient(160deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 252, 0.8) 55%, rgba(241, 245, 249, 0.75));
+    --nw-copilot-panel-strong-shadow: 0 12px 32px rgba(148, 163, 184, 0.1), 0 2px 8px rgba(148, 163, 184, 0.06);
+    --nw-copilot-panel-muted-bg: linear-gradient(160deg, rgba(255, 255, 255, 0.7), rgba(248, 250, 252, 0.6));
+    --nw-copilot-panel-muted-shadow: 0 4px 12px rgba(148, 163, 184, 0.06);
+    --nw-copilot-pill-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.8), rgba(241, 245, 249, 0.7));
+    --nw-copilot-pill-hover-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(226, 232, 240, 0.85));
+    --nw-copilot-pill-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 4px rgba(148, 163, 184, 0.08);
+    --nw-copilot-pill-hover-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 6px 16px rgba(148, 163, 184, 0.12), 0 2px 4px rgba(148, 163, 184, 0.06);
+    --nw-copilot-highlight-line: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.80), transparent);
+    --nw-copilot-track-bg: rgba(226, 232, 240, 0.6);
+    --nw-copilot-quote-bg: rgba(255, 255, 255, 0.85);
+    --nw-copilot-session-active-bg:
+      linear-gradient(150deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.82) 58%, rgba(241, 245, 249, 0.76));
+    --nw-copilot-session-active-shadow: 0 12px 32px rgba(148, 163, 184, 0.1), 0 4px 12px rgba(148, 163, 184, 0.06);
+    --nw-copilot-session-inactive-bg: linear-gradient(150deg, rgba(255, 255, 255, 0.75), rgba(248, 250, 252, 0.65));
+    --nw-copilot-session-inactive-shadow: 0 8px 16px rgba(148, 163, 184, 0.08);
+    --nw-copilot-session-rail-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(248, 250, 252, 0.5));
+    --nw-copilot-session-rail-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 4px 12px rgba(148, 163, 184, 0.06);
+
+    --nw-copilot-glow-blend: normal;
+    --nw-copilot-glow-op: 0.45;
+    --nw-copilot-glow-1: hsla(217, 70%, 80%, 0.18);
+    --nw-copilot-glow-2: hsla(270, 55%, 82%, 0.14);
+    --nw-copilot-glow-3: hsla(220, 70%, 82%, 0.12);
+    --nw-copilot-glow-4: hsla(217, 70%, 80%, 0.16);
   }
 }
 
@@ -121,6 +195,41 @@
   }
   .light .nw-drift-highlight {
     background: hsl(217 91% 60% / 0.15);
+  }
+
+  .nw-copilot-target-highlight {
+    border-color: hsl(var(--accent) / 0.62);
+    background:
+      linear-gradient(135deg, hsl(var(--accent) / 0.15), hsl(var(--background) / 0.74) 58%),
+      var(--nw-glass-bg);
+    box-shadow:
+      inset 0 0 0 1px hsl(var(--accent) / 0.14),
+      0 0 0 4px hsl(var(--accent) / 0.12),
+      0 16px 36px hsl(var(--accent) / 0.16);
+  }
+
+  .nw-copilot-target-highlight::before {
+    content: '';
+    position: absolute;
+    left: 8px;
+    top: 10px;
+    bottom: 10px;
+    width: 3px;
+    border-radius: 999px;
+    background: hsl(var(--accent));
+    box-shadow: 0 0 18px hsl(var(--accent) / 0.42);
+    pointer-events: none;
+  }
+
+  .light .nw-copilot-target-highlight {
+    border-color: hsl(var(--accent) / 0.78);
+    background:
+      linear-gradient(135deg, hsl(var(--accent) / 0.18), rgba(255, 255, 255, 0.96) 62%),
+      var(--nw-glass-bg);
+    box-shadow:
+      inset 0 0 0 1px hsl(var(--accent) / 0.18),
+      0 0 0 4px hsl(var(--accent) / 0.14),
+      0 18px 34px hsl(var(--accent) / 0.18);
   }
 
   /* Tailwind line-clamp plugin is not enabled; keep this utility local and explicit. */

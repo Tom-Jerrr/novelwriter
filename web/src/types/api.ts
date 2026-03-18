@@ -2,6 +2,7 @@ export interface Novel {
   id: number
   title: string
   author: string
+  language: string
   total_chapters: number
   created_at: string
   updated_at: string

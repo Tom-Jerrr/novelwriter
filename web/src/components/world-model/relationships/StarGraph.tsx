@@ -16,6 +16,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { cn } from '@/lib/utils'
+import { useTheme } from '@/hooks/useTheme'
 import { LABELS } from '@/constants/labels'
 import type { WorldRelationship, WorldEntity } from '@/types/api'
 import { buildGraph, type StarNodeData } from './starGraphLayout'
@@ -33,10 +34,10 @@ function StarNode({ data }: NodeProps<Node<StarNodeData>>) {
   const typeText = data.isDraft ? `${data.entityTypeLabel} · ${LABELS.STATUS_DRAFT}` : data.entityTypeLabel
   return (
     <div className={cn(
-      'px-4 py-2 rounded-xl border select-none backdrop-blur-2xl transition-colors',
+      'px-4 py-2 rounded-xl border select-none backdrop-blur-3xl transition-all duration-300',
       data.isCenter
-        ? 'border-accent border-2 font-semibold text-foreground bg-[hsl(var(--color-accent)/0.12)] shadow-[0_0_28px_hsl(var(--color-accent)/0.18)]'
-        : 'border-[var(--nw-glass-border)] bg-[hsl(var(--foreground)/0.06)] hover:border-[var(--nw-glass-border-hover)] hover:bg-[hsl(var(--foreground)/0.09)] cursor-pointer text-foreground shadow-[0_10px_30px_rgba(0,0,0,0.35)]'
+        ? 'border-accent border-2 font-semibold text-foreground bg-[hsl(var(--color-accent)/0.15)] shadow-[0_8px_32px_hsl(var(--color-accent)/0.20)] dark:bg-[hsl(var(--color-accent)/0.15)] dark:shadow-[0_0_28px_hsl(var(--color-accent)/0.25)]'
+        : 'border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] hover:border-[var(--nw-glass-border-hover)] hover:bg-[var(--nw-glass-bg-hover)] cursor-pointer text-foreground shadow-[0_8px_24px_rgba(0,0,0,0.08)] hover:shadow-[0_12px_32px_rgba(0,0,0,0.12)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.35)] dark:hover:shadow-[0_14px_40px_rgba(0,0,0,0.5)] hover:-translate-y-[1px]'
     )}>
       {HANDLES.map(({ id, pos }) => (
         <Fragment key={id}>
@@ -134,6 +135,7 @@ export function StarGraph({ centerId, relationships, entities, onSelectEntity, o
   selectedRelId?: number | null
   onClearSelection?: () => void
 }) {
+  const { theme } = useTheme()
   const entityMap = useMemo(() => new Map(entities.map(e => [e.id, e])), [entities])
 
   const selectedRelIdValue = selectedRelId ?? null
@@ -156,7 +158,7 @@ export function StarGraph({ centerId, relationships, entities, onSelectEntity, o
       <ReactFlow
         key={centerId}
         className="bg-transparent"
-        colorMode="dark"
+        colorMode={theme}
         style={{
           '--xy-background-color': 'transparent',
           // Defensive overrides: ensure no default XYFlow label/node surfaces render as opaque white
