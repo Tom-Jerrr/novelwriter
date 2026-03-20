@@ -646,6 +646,64 @@ class TestSuggestionCompilation:
         assert compiled[0].preview["actionable"] is False
         assert "请先确认相关实体" in (compiled[0].preview["non_actionable_reason"] or "")
 
+    def test_compile_suggestions_localizes_preview_to_english(self, db, novel, entities):
+        from app.core.copilot import compile_suggestions
+
+        snapshot = self._make_snapshot(entities, [], [], db)
+        raw = [{
+            "kind": "update_entity",
+            "title": "Fill entity",
+            "summary": "Add clearer details",
+            "target_resource": "entity",
+            "target_id": entities[0].id,
+            "delta": {
+                "description": "A clearer English description",
+                "attributes": [{"key": "Faction", "surface": "Tai Xuan Sect"}],
+            },
+        }]
+
+        compiled = compile_suggestions(
+            raw,
+            [],
+            snapshot,
+            "research",
+            "current_entity",
+            interaction_locale="en",
+        )
+
+        labels = {item["label"] for item in compiled[0].preview["field_deltas"]}
+        assert "Description" in labels
+        assert "Attribute · Faction" in labels
+
+    def test_create_relationship_non_actionable_reason_localizes_to_english(self, db, novel, entities):
+        from app.core.copilot import compile_suggestions
+
+        snapshot = self._make_snapshot(entities, [], [], db)
+        raw = [{
+            "kind": "create_relationship",
+            "title": "Add bond",
+            "summary": "Link two unresolved targets",
+            "target_resource": "relationship",
+            "target_id": None,
+            "delta": {
+                "source_id": 9991,
+                "target_id": 9992,
+                "label": "Ally",
+            },
+        }]
+
+        compiled = compile_suggestions(
+            raw,
+            [],
+            snapshot,
+            "research",
+            "relationships",
+            interaction_locale="en",
+        )
+
+        assert compiled[0].preview["actionable"] is False
+        assert "Confirm those first" in (compiled[0].preview["non_actionable_reason"] or "")
+
     def test_create_relationship_with_same_run_entity_dependencies_compiles_actionable(self, db, novel, entities):
         from app.core.copilot import compile_suggestions
 
@@ -777,11 +835,11 @@ class TestSuggestionCompilation:
 
 
 class TestApplyContract:
-    def _create_completed_run(self, db, novel, entities):
+    def _create_completed_run(self, db, novel, entities, interaction_locale: str = "zh"):
         session = CopilotSession(
             session_id="test-sess-apply", novel_id=novel.id, user_id=1,
             mode="current_entity", scope="current_entity", context_json={"entity_id": entities[0].id},
-            interaction_locale="zh", signature="sig-apply", display_title="张三",
+            interaction_locale=interaction_locale, signature=f"sig-apply-{interaction_locale}", display_title=entities[0].name,
         )
         db.add(session)
         db.commit()
@@ -909,6 +967,19 @@ class TestApplyContract:
         resp = client.post(f"/api/novels/{novel.id}/world/copilot/sessions/{session.session_id}/runs/{run.run_id}/apply", json={"suggestion_ids": ["sg_advisory"]})
         assert resp.json()["results"][0]["success"] is False
         assert resp.json()["results"][0]["error_code"] == "not_actionable"
+
+    def test_apply_endpoint_localizes_not_actionable_error_to_english(self, client, db, novel, entities):
+        session, run = self._create_completed_run(db, novel, entities, interaction_locale="en")
+        resp = client.post(
+            f"/api/novels/{novel.id}/world/copilot/sessions/{session.session_id}/runs/{run.run_id}/apply",
+            json={"suggestion_ids": ["sg_advisory"]},
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["results"][0]
+        assert result["success"] is False
+        assert result["error_code"] == "not_actionable"
+        assert "cannot be applied directly" in result["error_message"]
 
     def test_stale_target_doesnt_block_others(self, client, db, novel, entities):
         session, run = self._create_completed_run(db, novel, entities)
@@ -1832,6 +1903,26 @@ class TestScopeAndPrompt:
         assert "canonical" in prompt.lower() or "原语言" in prompt
         assert "张三" in prompt  # Chinese entity name preserved
 
+    def test_english_prompt_localizes_instruction_scaffold(self, db, novel, entities, chapters):
+        from app.core.copilot import build_copilot_system_prompt, gather_evidence, load_scope_snapshot
+
+        snapshot = load_scope_snapshot(db, novel, "research", "whole_book", None)
+        evidence = gather_evidence(db, novel, snapshot, None, interaction_locale="en")
+        prompt = build_copilot_system_prompt(
+            snapshot,
+            evidence,
+            "whole_book",
+            "en",
+            {"context_json": {"surface": "atlas", "tab": "systems"}, "display_title": "World sweep"},
+            "task_query",
+        )
+
+        assert "You are a novel world-model research assistant" in prompt
+        assert "## Current task" in prompt
+        assert "## Current workbench context" in prompt
+        assert "Canonical names and labels must remain" in prompt
+        assert "张三" in prompt
+
     def test_prompt_explicitly_allows_non_character_entities(self, db, novel, entities, chapters):
         from app.core.copilot import build_copilot_system_prompt, gather_evidence, load_scope_snapshot
 
@@ -1877,6 +1968,22 @@ class TestScopeAndPrompt:
 
         assert any(item.evidence_id.startswith("draft_ent_") for item in evidence)
         assert all(item.source_type != "chapter_excerpt" for item in evidence)
+
+    def test_gather_evidence_localizes_to_english(self, db, novel, entities, chapters):
+        from app.core.copilot import gather_evidence, load_scope_snapshot
+
+        snapshot = load_scope_snapshot(db, novel, "current_entity", "current_entity", {"entity_id": entities[0].id})
+        evidence = gather_evidence(
+            db,
+            novel,
+            snapshot,
+            {"entity_id": entities[0].id},
+            interaction_locale="en",
+        )
+
+        assert any(item.title.startswith("Chapter ") for item in evidence if item.source_type == "chapter_excerpt")
+        assert any(item.title == f"Entity · {entities[0].name}" for item in evidence)
+        assert any(item.why_relevant == "Current research target entity" for item in evidence)
 
 
 # ===========================================================================
@@ -2448,6 +2555,39 @@ class TestDegradation:
         assert run.status == "completed"
         assert any(
             step["summary"] == "当前模型不支持分步检索，已切换为直接分析"
+            for step in (run.trace_json or [])
+        )
+
+        db.close = original_close
+
+    @pytest.mark.asyncio
+    async def test_tool_unsupported_degrades_to_one_shot_with_english_trace(self, db, novel, entities, chapters, monkeypatch):
+        from app.core.ai_client import ToolCallUnsupportedError
+        from app.core.copilot import create_run, execute_copilot_run, open_or_reuse_session
+
+        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "en", "")
+        run = create_run(db, session, 1, "Summarize the world")
+
+        async def mock_tool_loop(*args, **kwargs):
+            raise ToolCallUnsupportedError("tools not supported")
+
+        async def mock_one_shot(snapshot, evidence, scenario, session_data, turn_intent, prompt, llm_config, user_id, **kwargs):
+            return {"answer": "one-shot fallback", "suggestions": []}, evidence
+
+        monkeypatch.setattr("app.core.copilot._run_tool_loop", mock_tool_loop)
+        monkeypatch.setattr("app.core.copilot._run_one_shot", mock_one_shot)
+        monkeypatch.setattr("app.core.copilot.acquire_llm_slot", lambda: _noop_coro())
+        monkeypatch.setattr("app.core.copilot.release_llm_slot", lambda: None)
+        monkeypatch.setattr("app.database.SessionLocal", lambda: db)
+        original_close = db.close
+        monkeypatch.setattr(db, "close", lambda: None)
+
+        await execute_copilot_run(run.run_id, novel.id, 1, None)
+
+        db.refresh(run)
+        assert run.status == "completed"
+        assert any(
+            step["summary"] == "The current model does not support multi-step retrieval, so the run switched to direct analysis"
             for step in (run.trace_json or [])
         )
 

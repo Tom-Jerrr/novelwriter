@@ -1,5 +1,6 @@
+import type { copilotZhMessages } from '@/lib/uiMessagePacks/copilot'
 import type { legalZhMessages } from '@/lib/uiMessagePacks/legal'
-import type { continuationZhMessages, worldModelZhMessages } from '@/lib/uiMessagePacks/novel'
+import type { novelZhMessages } from '@/lib/uiMessagePacks/novel'
 
 export type UiLocale = 'zh' | 'en'
 
@@ -171,7 +172,7 @@ const zhMessages = {
   ...feedbackZhMessages,
 } as const satisfies Record<string, UiMessageValue>
 
-type UiMessageCatalog = typeof zhMessages & typeof worldModelZhMessages & typeof continuationZhMessages & typeof legalZhMessages
+type UiMessageCatalog = typeof zhMessages & typeof novelZhMessages & typeof copilotZhMessages & typeof legalZhMessages
 
 export type UiMessageKey = Extract<keyof UiMessageCatalog, string>
 

@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session, object_session
 from app.core.ai_client import AIClient, ToolCallUnsupportedError
 from app.core.auth import settle_quota_reservation
 from app.core.copilot.apply import ApplyResult, apply_suggestions
+from app.core.copilot.i18n import choose_locale_text
 from app.core.copilot.prompting import (
     apply_quick_action_prompt,
     build_auto_preload as _build_auto_preload,
@@ -142,6 +143,37 @@ class CopilotError(RuntimeError):
 
 class RunLeaseLostError(RuntimeError):
     """Raised when a worker no longer owns the run lease."""
+
+
+def _resolve_run_interaction_locale(run: CopilotRun | None) -> str:
+    if run is None:
+        return "zh"
+    session = getattr(run, "session", None)
+    return str(getattr(session, "interaction_locale", "zh") or "zh")
+
+
+def _copilot_run_failed_message(interaction_locale: str) -> str:
+    return choose_locale_text(
+        interaction_locale,
+        COPILOT_RUN_FAILED_MESSAGE,
+        "Copilot run failed. Please try again.",
+    )
+
+
+def _copilot_run_interrupted_message(interaction_locale: str) -> str:
+    return choose_locale_text(
+        interaction_locale,
+        COPILOT_RUN_INTERRUPTED_MESSAGE,
+        "The copilot run lost its active background lease. Please try again.",
+    )
+
+
+def _running_trace_summary(interaction_locale: str) -> str:
+    return choose_locale_text(
+        interaction_locale,
+        "正在研究，等待模型决定是否调用工具...",
+        "Research in progress. Waiting for the model to decide whether tools are needed...",
+    )
 
 
 def _utcnow_naive() -> datetime:
@@ -296,7 +328,7 @@ def reclaim_stale_runs(
     run_ids: list[str] | None = None,
     user_id: int | None = None,
     copilot_session_id: int | None = None,
-    message: str = COPILOT_RUN_INTERRUPTED_MESSAGE,
+    message: str | None = None,
 ) -> list[str]:
     """Interrupt stale queued/running runs and return reclaimed run_ids."""
     query = db.query(CopilotRun).filter(CopilotRun.status.in_(tuple(ACTIVE_RUN_STATUSES)))
@@ -316,7 +348,11 @@ def reclaim_stale_runs(
             "Reclaiming stale copilot run",
             extra={"run_id": run.run_id, "status": run.status, "user_id": run.user_id},
         )
-        _interrupt_run(run, message=message, now=now)
+        _interrupt_run(
+            run,
+            message=message or _copilot_run_interrupted_message(_resolve_run_interaction_locale(run)),
+            now=now,
+        )
         _settle_run_quota(db, run)
         reclaimed.append(run.run_id)
 
@@ -339,7 +375,11 @@ def _claim_run_for_execution(
     if run.status != "queued":
         return None
     if is_stale_run(run):
-        _interrupt_run(run, message=COPILOT_RUN_INTERRUPTED_MESSAGE, now=_utcnow_naive())
+        _interrupt_run(
+            run,
+            message=_copilot_run_interrupted_message(_resolve_run_interaction_locale(run)),
+            now=_utcnow_naive(),
+        )
         _settle_run_quota(db, run)
         db.commit()
         return None
@@ -361,7 +401,7 @@ def _claim_run_for_execution(
                     "step_id": "session_start",
                     "kind": "tool_mode",
                     "status": "running",
-                    "summary": "正在研究，等待模型决定是否调用工具...",
+                    "summary": _running_trace_summary(_resolve_run_interaction_locale(run)),
                 }],
                 CopilotRun.updated_at: now,
             },
@@ -812,10 +852,20 @@ async def execute_copilot_run(
         snapshot = load_scope_snapshot(db, novel, session.mode, session.scope, run_context)
         scenario = derive_scenario(session.mode, session.scope, run_context)
         raw_prompt = run.prompt
-        effective_prompt = apply_quick_action_prompt(raw_prompt, run.quick_action_id)
+        effective_prompt = apply_quick_action_prompt(
+            raw_prompt,
+            run.quick_action_id,
+            session.interaction_locale,
+        )
         turn_intent = classify_turn_intent(raw_prompt)
         evidence = (
-            gather_evidence(db, novel, snapshot, run_context)
+            gather_evidence(
+                db,
+                novel,
+                snapshot,
+                run_context,
+                interaction_locale=session.interaction_locale,
+            )
             if _should_preload_world_context(turn_intent)
             else []
         )
@@ -915,6 +965,7 @@ async def execute_copilot_run(
                 parsed.get("suggestions", []) if _should_preload_world_context(turn_intent) else [],
                 final_evidence, fresh_snapshot,
                 session_data["mode"], scenario,
+                interaction_locale=session_data["interaction_locale"],
             )
         finally:
             db_compile.close()
@@ -943,7 +994,7 @@ async def execute_copilot_run(
                         err_db,
                         err_run,
                         "run_execution_error",
-                        COPILOT_RUN_FAILED_MESSAGE,
+                        _copilot_run_failed_message(_resolve_run_interaction_locale(err_run)),
                         worker_id=worker_id,
                     )
             finally:
@@ -1056,7 +1107,11 @@ def check_stale_run(run: CopilotRun) -> bool:
     """Check if an active run is stale and mark it interrupted. Returns True if stale."""
     if not is_stale_run(run):
         return False
-    _interrupt_run(run, message=COPILOT_RUN_INTERRUPTED_MESSAGE, now=_utcnow_naive())
+    _interrupt_run(
+        run,
+        message=_copilot_run_interrupted_message(_resolve_run_interaction_locale(run)),
+        now=_utcnow_naive(),
+    )
     _settle_attached_run_quota(run)
     return True
 

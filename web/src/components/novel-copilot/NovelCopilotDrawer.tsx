@@ -2,6 +2,7 @@ import type React from 'react'
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { Bot, RotateCcw, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { getCopilotScopeLabel } from './novelCopilotHelpers'
 import { useNovelCopilot } from './NovelCopilotContext'
 import type { CopilotSuggestionTarget } from '@/types/copilot'
@@ -125,6 +126,7 @@ function ActiveNovelCopilotDrawer({
   applySuggestions: ReturnType<typeof useNovelCopilot>['applySuggestions']
   dismissSuggestions: ReturnType<typeof useNovelCopilot>['dismissSuggestions']
 }) {
+  const { locale, t } = useUiLocale()
   const [fallbackDrawerWidth, setFallbackDrawerWidth] = useState(DEFAULT_NOVEL_SHELL_DRAWER_WIDTH)
   const [isDragging, setIsDragging] = useState(false)
   const [retryingRunId, setRetryingRunId] = useState<string | null>(null)
@@ -184,7 +186,7 @@ function ActiveNovelCopilotDrawer({
   }, [setDrawerWidth])
 
   const session = focusedSession ?? focusedSessionMeta
-  const workbenchMeta = getCopilotWorkbenchMeta(session.prefill, session.displayTitle)
+  const workbenchMeta = getCopilotWorkbenchMeta(session.prefill, session.displayTitle, locale)
   const quickActionPrompts = Object.fromEntries(
     workbenchMeta.quickActions.map((action) => [action.id, action.prompt]),
   )
@@ -192,7 +194,7 @@ function ActiveNovelCopilotDrawer({
   const handleAction = (action: string) => {
     void submitPrompt(
       session.sessionId,
-      quickActionPrompts[action] ?? '请基于当前上下文给出高价值建议。',
+      quickActionPrompts[action] ?? t('copilot.drawer.fallbackPrompt'),
       session.prefill.scope,
       session.prefill.context,
       action,
@@ -203,7 +205,7 @@ function ActiveNovelCopilotDrawer({
     void submitPrompt(session.sessionId, prompt, session.prefill.scope, session.prefill.context)
   }
 
-  const scopeLabel = getCopilotScopeLabel(session.prefill)
+  const scopeLabel = getCopilotScopeLabel(session.prefill, locale)
   const sessionRuns = getSessionRuns(session.sessionId)
   const focusedStatus =
     activeRun?.status === 'queued' || activeRun?.status === 'running'
@@ -270,11 +272,11 @@ function ActiveNovelCopilotDrawer({
                         {scopeLabel}
                       </span>
                       <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[10px] text-muted-foreground/75', copilotPillClassName)}>
-                        {sessions.length} 个会话
+                        {t('copilot.drawer.sessionsCount', { count: sessions.length })}
                       </span>
                     </div>
                     <div className="mt-2 truncate text-[11px] text-muted-foreground/70">
-                      当前工作区：{session.displayTitle}
+                      {t('copilot.drawer.currentWorkspace', { title: session.displayTitle })}
                     </div>
                   </div>
                 </div>
@@ -316,7 +318,7 @@ function ActiveNovelCopilotDrawer({
                       </div>
                     </div>
                     <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium text-foreground/76', copilotPillClassName)}>
-                      工作区
+                      {t('copilot.drawer.workspace')}
                     </span>
                   </div>
                 </div>
@@ -342,7 +344,7 @@ function ActiveNovelCopilotDrawer({
                       <div className="flex justify-end">
                         <div className={cn(copilotPanelStrongClassName, 'max-w-[88%] rounded-[24px] rounded-tr-md px-4 py-3')}>
                           <div className="mb-1 text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground/70">
-                            {isLatestRun ? '当前请求' : '之前的请求'}
+                            {isLatestRun ? t('copilot.drawer.currentRequest') : t('copilot.drawer.previousRequest')}
                           </div>
                           <div className="text-[13px] leading-relaxed text-foreground/95">{run.prompt}</div>
                         </div>
@@ -359,10 +361,10 @@ function ActiveNovelCopilotDrawer({
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-[hsl(var(--color-danger))]/85">
-                                  已中断
+                                  {t('copilot.drawer.interrupted')}
                                 </div>
                                 <div className="mt-1 text-[13px] leading-relaxed text-[hsl(var(--color-danger))]">
-                                  {run.error ?? '这轮研究已中断，请稍后重试。'}
+                                  {run.error ?? t('copilot.drawer.interruptedFallback')}
                                 </div>
                               </div>
                               {isLatestRun && (
@@ -376,14 +378,14 @@ function ActiveNovelCopilotDrawer({
                                   )}
                                 >
                                   <RotateCcw className={cn('h-3.5 w-3.5', retryingRunId === run.run_id && 'animate-spin')} />
-                                  {retryingRunId === run.run_id ? '恢复中…' : '恢复上次研究'}
+                                  {retryingRunId === run.run_id ? t('copilot.drawer.retryingInterrupted') : t('copilot.drawer.retryInterrupted')}
                                 </button>
                               )}
                             </div>
                             {isLatestRun && (
                               <div className="flex items-start justify-between gap-3 text-[11px] leading-relaxed text-muted-foreground/72">
                                 <span>
-                                  恢复将继续上次检索进度；如需换问题，请直接在下方输入新请求。
+                                  {t('copilot.drawer.retryHint')}
                                 </span>
                               </div>
                             )}
@@ -393,14 +395,14 @@ function ActiveNovelCopilotDrawer({
 
                       {run.status === 'error' && (
                         <div className={cn(dashedPanelClassName, 'border-[hsl(var(--color-danger)/0.22)] text-[hsl(var(--color-danger))] [background:linear-gradient(160deg,hsl(var(--color-danger)/0.08),transparent)]')}>
-                          {run.error ?? '本轮运行出现异常，请稍后重试。'}
+                          {run.error ?? t('copilot.drawer.errorFallback')}
                         </div>
                       )}
 
                       {run.status === 'completed' && run.answer && (
                         <div className={cn(copilotPanelClassName, 'rounded-[22px] rounded-tl-md px-4 py-3')}>
                           <div className="mb-1 text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground/70">
-                            分析结果
+                            {t('copilot.drawer.analysisResult')}
                           </div>
                           <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">{run.answer}</div>
                         </div>
@@ -414,9 +416,9 @@ function ActiveNovelCopilotDrawer({
                         <section className={sectionPanelClassName}>
                           <div className="mb-3 flex items-center justify-between gap-3 px-1">
                             <h3 className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground/80">
-                              建议列表
+                              {t('copilot.drawer.suggestions')}
                             </h3>
-                            <div className="text-[10px] font-medium tracking-[0.05em] text-muted-foreground/60">{pendingSuggestions.length} 条待确认</div>
+                            <div className="text-[10px] font-medium tracking-[0.05em] text-muted-foreground/60">{t('copilot.drawer.pendingSuggestions', { count: pendingSuggestions.length })}</div>
                           </div>
                           <div className="space-y-3">
                             {pendingSuggestions.map((s) => (
@@ -436,9 +438,9 @@ function ActiveNovelCopilotDrawer({
                         <section className={sectionPanelClassName}>
                           <div className="mb-3 flex items-center justify-between gap-3 px-1">
                             <h3 className="text-[10px] font-medium uppercase tracking-[0.2em] text-foreground/70">
-                              已采纳
+                              {t('copilot.drawer.applied')}
                             </h3>
-                            <div className="text-[10px] font-medium tracking-[0.05em] text-muted-foreground/60">{appliedSuggestions.length} 条已保留</div>
+                            <div className="text-[10px] font-medium tracking-[0.05em] text-muted-foreground/60">{t('copilot.drawer.appliedSuggestions', { count: appliedSuggestions.length })}</div>
                           </div>
                           <div className="space-y-3">
                             {appliedSuggestions.map((s) => (
@@ -456,12 +458,12 @@ function ActiveNovelCopilotDrawer({
                       )}
 
                       {run.status === 'completed' && pendingSuggestions.length === 0 && appliedSuggestions.length === 0 && !run.answer && (
-                        <div className={dashedPanelClassName}>未找到相关的建议。</div>
+                        <div className={dashedPanelClassName}>{t('copilot.drawer.noSuggestions')}</div>
                       )}
 
                       {run.status === 'completed' && pendingSuggestions.length === 0 && appliedSuggestions.length > 0 && (
                         <div className={dashedPanelClassName}>
-                          本轮待处理建议已全部处理；已采纳建议保留在当前会话中。
+                          {t('copilot.drawer.allHandled')}
                         </div>
                       )}
                     </div>

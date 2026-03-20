@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import type { CopilotRunStatus, NovelCopilotSession } from '@/types/copilot'
 import { getCopilotScopeLabel } from './novelCopilotHelpers'
 import { getCopilotRunStatusMeta } from './novelCopilotView'
@@ -25,6 +26,7 @@ export function NovelCopilotSessionStrip({
   onFocusSession: (sessionId: string) => void
   onRemoveSession: (sessionId: string) => void
 }) {
+  const { locale, t } = useUiLocale()
   if (sessions.length === 0) return null
 
   return (
@@ -35,21 +37,21 @@ export function NovelCopilotSessionStrip({
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground/68">
-            并行工作区
+            {t('copilot.sessionStrip.title')}
           </div>
           <div className="mt-1 text-[11px] text-muted-foreground/62">
-            切换查看不会中断后台运行
+            {t('copilot.sessionStrip.hint')}
           </div>
         </div>
         <div className={cn('inline-flex items-center rounded-full px-2 py-1 text-[10px] font-medium text-muted-foreground', copilotPillClassName)}>
-          {sessions.length} 个会话
+          {t('copilot.drawer.sessionsCount', { count: sessions.length })}
         </div>
       </div>
       <div className={cn('rounded-[24px] p-2.5', copilotSessionRailClassName)}>
         <div className="flex gap-2.5 overflow-x-auto scrollbar-hide snap-x snap-mandatory">
           {sessions.map((session) => {
             const isFocused = session.sessionId === focusedSessionId
-            const statusMeta = getCopilotRunStatusMeta(getSessionStatus(session.sessionId))
+            const statusMeta = getCopilotRunStatusMeta(getSessionStatus(session.sessionId), locale)
 
             return (
               <div
@@ -77,7 +79,7 @@ export function NovelCopilotSessionStrip({
                   <div className="mb-2 flex items-center gap-1.5">
                     <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', statusMeta.dotClassName)} />
                     <span className="truncate text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/72">
-                      {getCopilotScopeLabel(session.prefill)}
+                      {getCopilotScopeLabel(session.prefill, locale)}
                     </span>
                   </div>
                   <div className="truncate text-sm font-semibold text-foreground">
@@ -89,7 +91,7 @@ export function NovelCopilotSessionStrip({
                     </span>
                     {isFocused ? (
                       <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium text-foreground/82', copilotPillClassName)}>
-                        当前
+                        {t('copilot.sessionStrip.current')}
                       </span>
                     ) : null}
                   </div>
@@ -100,7 +102,7 @@ export function NovelCopilotSessionStrip({
                     event.stopPropagation()
                     onRemoveSession(session.sessionId)
                   }}
-                  aria-label="关闭会话"
+                  aria-label={t('copilot.sessionStrip.close')}
                   data-role="close-session"
                   className={cn(
                     'absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground/72 transition-all hover:text-foreground',

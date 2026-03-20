@@ -1,4 +1,5 @@
 import { useMemo, type ReactNode } from 'react'
+import '@/lib/uiMessagePacks/copilot'
 import {
   getDefaultCopilotInteractionLocale,
   normalizeCopilotInteractionLocale,

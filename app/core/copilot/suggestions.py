@@ -10,6 +10,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from app.core.copilot.i18n import choose_locale_text
 from sqlalchemy.orm import Session
 
 from app.core.copilot.scope import EvidenceItem, ScopeSnapshot
@@ -84,6 +85,7 @@ def _build_entity_suggestion_candidates(
 def _expand_relationship_entity_dependencies(
     raw_suggestions: list[dict[str, Any]],
     snapshot: ScopeSnapshot,
+    interaction_locale: str,
 ) -> list[dict[str, Any]]:
     """Synthesize missing create_entity suggestions for relationship endpoints."""
     expanded: list[dict[str, Any]] = []
@@ -114,8 +116,16 @@ def _expand_relationship_entity_dependencies(
                 endpoint_type = str(delta.get(f"{endpoint}_entity_type") or "Other").strip() or "Other"
                 expanded.append({
                     "kind": "create_entity",
-                    "title": f"补入关联实体「{endpoint_name}」",
-                    "summary": f"为关系建议补入缺失实体「{endpoint_name}」。",
+                    "title": choose_locale_text(
+                        interaction_locale,
+                        f"补入关联实体「{endpoint_name}」",
+                        f'Add related entity "{endpoint_name}"',
+                    ),
+                    "summary": choose_locale_text(
+                        interaction_locale,
+                        f"为关系建议补入缺失实体「{endpoint_name}」。",
+                        f'Add the missing entity "{endpoint_name}" so the relationship suggestion can be applied.',
+                    ),
                     "target_resource": "entity",
                     "target_id": None,
                     "cited_evidence_indices": list(raw.get("cited_evidence_indices") or []),
@@ -138,12 +148,14 @@ def compile_suggestions(
     snapshot: ScopeSnapshot,
     mode: str,
     scenario: str,
+    interaction_locale: str = "zh",
 ) -> list[CompiledSuggestion]:
     """Backend-compile model-drafted suggestions into validated actionable cards."""
     limited_raw_suggestions = raw_suggestions[:MAX_COMPILED_SUGGESTIONS]
     expanded_raw_suggestions = _expand_relationship_entity_dependencies(
         limited_raw_suggestions,
         snapshot,
+        interaction_locale,
     )
     suggestion_ids = [f"sg_{i}_{uuid.uuid4().hex[:8]}" for i, _ in enumerate(expanded_raw_suggestions)]
     entity_candidates = _build_entity_suggestion_candidates(expanded_raw_suggestions, suggestion_ids)
@@ -159,6 +171,7 @@ def compile_suggestions(
                 mode,
                 scenario,
                 entity_candidates,
+                interaction_locale,
             )
             compiled.append(suggestion)
         except Exception:
@@ -175,9 +188,13 @@ def _compile_one(
     mode: str,
     scenario: str,
     entity_candidates: dict[str, dict[str, Any]],
+    interaction_locale: str,
 ) -> CompiledSuggestion:
     kind = raw.get("kind", "")
-    title = raw.get("title", f"建议 {index + 1}")
+    title = raw.get(
+        "title",
+        choose_locale_text(interaction_locale, f"建议 {index + 1}", f"Suggestion {index + 1}"),
+    )
     summary = raw.get("summary", "")
     target_resource = raw.get("target_resource", "entity")
     is_draft_governance = (
@@ -207,26 +224,46 @@ def _compile_one(
         if resolved is None:
             actionable = False
             target_label = str(target_id or "?")
-            non_actionable_reason = "这条建议对应的内容刚刚发生了变化，请刷新后再试一次。"
+            non_actionable_reason = choose_locale_text(
+                interaction_locale,
+                "这条建议对应的内容刚刚发生了变化，请刷新后再试一次。",
+                "This suggestion is stale because the underlying content just changed. Refresh and try again.",
+            )
         else:
             target_id = resolved["id"]
             target_label = resolved["label"]
             if is_draft_governance and not resolved.get("is_draft", False):
                 actionable = False
-                non_actionable_reason = "这一步只能直接整理待确认内容，已确认内容请到对应页面编辑。"
+                non_actionable_reason = choose_locale_text(
+                    interaction_locale,
+                    "这一步只能直接整理待确认内容，已确认内容请到对应页面编辑。",
+                    "This step can only tidy draft content directly. Edit confirmed content from its main page instead.",
+                )
             else:
                 apply_action = _build_update_action(kind, delta, target_resource, target_id, snapshot, mode)
                 if apply_action is None:
                     actionable = False
-                    non_actionable_reason = "这条建议暂时还不能直接采纳，请换一种方式继续整理。"
+                    non_actionable_reason = choose_locale_text(
+                        interaction_locale,
+                        "这条建议暂时还不能直接采纳，请换一种方式继续整理。",
+                        "This suggestion cannot be applied directly yet. Please continue with a different edit.",
+                    )
 
     elif kind.startswith("create_"):
         if is_draft_governance:
             actionable = False
-            non_actionable_reason = "这里更适合整理现有待确认内容；新建内容请先回到正常编辑流程。"
+            non_actionable_reason = choose_locale_text(
+                interaction_locale,
+                "这里更适合整理现有待确认内容；新建内容请先回到正常编辑流程。",
+                "This workspace is for cleaning up existing draft content. Please return to the normal editing flow to create new items.",
+            )
         else:
             target_id = None
-            target_label = delta.get("name", "") or delta.get("label", "") or f"新{target_resource}"
+            target_label = (
+                delta.get("name", "")
+                or delta.get("label", "")
+                or _build_new_resource_label(target_resource, interaction_locale)
+            )
             apply_action = _build_create_action(kind, delta, target_resource, snapshot, entity_candidates)
             if apply_action is None:
                 actionable = False
@@ -236,15 +273,27 @@ def _compile_one(
                     target_resource,
                     snapshot,
                     entity_candidates,
+                    interaction_locale,
                 )
     else:
         actionable = False
         target_label = str(target_id or "?")
-        non_actionable_reason = "这条建议目前还不能直接采纳。"
+        non_actionable_reason = choose_locale_text(
+            interaction_locale,
+            "这条建议目前还不能直接采纳。",
+            "This suggestion cannot be applied directly right now.",
+        )
 
-    field_deltas = _build_field_deltas(kind, delta, target_id, target_resource, snapshot)
+    field_deltas = _build_field_deltas(
+        kind,
+        delta,
+        target_id,
+        target_resource,
+        snapshot,
+        interaction_locale,
+    )
     preview = {
-        "target_label": target_label or f"新建{target_resource}",
+        "target_label": target_label or _build_new_resource_label(target_resource, interaction_locale),
         "summary": summary,
         "field_deltas": field_deltas,
         "evidence_quotes": evidence_quotes,
@@ -299,6 +348,19 @@ def _resource_to_tab(resource: str, profile: str) -> str:
     if profile == "draft_governance":
         return "review"
     return {"entity": "entities", "relationship": "relationships", "system": "systems"}.get(resource, "entities")
+
+
+def _build_new_resource_label(resource: str, interaction_locale: str) -> str:
+    resource_label = choose_locale_text(
+        interaction_locale,
+        {"entity": "实体", "relationship": "关系", "system": "体系"}.get(resource, resource),
+        {"entity": "entity", "relationship": "relationship", "system": "system"}.get(resource, resource),
+    )
+    return choose_locale_text(
+        interaction_locale,
+        f"新{resource_label}",
+        f"New {resource_label}",
+    )
 
 
 def _resource_to_review_kind(resource: str) -> str:
@@ -517,11 +579,20 @@ def _build_non_actionable_create_reason(
     target_resource: str,
     snapshot: ScopeSnapshot,
     entity_candidates: dict[str, dict[str, Any]],
+    interaction_locale: str,
 ) -> str:
     if target_resource == "entity":
         if not delta.get("name"):
-            return "这条实体建议还不完整，暂时不能直接采纳。"
-        return "这个名字和现有内容太接近了，请先调整后再确认。"
+            return choose_locale_text(
+                interaction_locale,
+                "这条实体建议还不完整，暂时不能直接采纳。",
+                "This entity suggestion is incomplete and cannot be applied yet.",
+            )
+        return choose_locale_text(
+            interaction_locale,
+            "这个名字和现有内容太接近了，请先调整后再确认。",
+            "This name is too close to existing content. Adjust it before applying.",
+        )
 
     if target_resource == "relationship":
         source_id = delta.get("source_id")
@@ -530,9 +601,17 @@ def _build_non_actionable_create_reason(
         target_name = str(delta.get("target_name") or "").strip()
         label = delta.get("label")
         if not label:
-            return "这条关系信息还不完整，暂时不能直接采纳。"
+            return choose_locale_text(
+                interaction_locale,
+                "这条关系信息还不完整，暂时不能直接采纳。",
+                "This relationship suggestion is incomplete and cannot be applied yet.",
+            )
         if not any([isinstance(source_id, int), source_name]) or not any([isinstance(target_id, int), target_name]):
-            return "这条关系信息还不完整，暂时不能直接采纳。"
+            return choose_locale_text(
+                interaction_locale,
+                "这条关系信息还不完整，暂时不能直接采纳。",
+                "This relationship suggestion is incomplete and cannot be applied yet.",
+            )
 
         source_ref = _resolve_relationship_endpoint_reference(
             endpoint_id=source_id,
@@ -547,18 +626,38 @@ def _build_non_actionable_create_reason(
             entity_candidates=entity_candidates,
         )
         if source_ref is None or target_ref is None:
-            return "这条关系还依赖未确认的实体或设定。请先确认相关实体，再来确认这条关系。"
-        return "这条关系和现有内容重复或冲突了，暂时不能直接采纳。"
+            return choose_locale_text(
+                interaction_locale,
+                "这条关系还依赖未确认的实体或设定。请先确认相关实体，再来确认这条关系。",
+                "This relationship still depends on unconfirmed entities or world details. Confirm those first, then apply the relationship.",
+            )
+        return choose_locale_text(
+            interaction_locale,
+            "这条关系和现有内容重复或冲突了，暂时不能直接采纳。",
+            "This relationship duplicates or conflicts with existing content, so it cannot be applied yet.",
+        )
 
     if target_resource == "system":
         if not delta.get("name"):
-            return "这条体系建议还不完整，暂时不能直接采纳。"
-        return "这个体系名称和现有内容太接近了，请先调整后再确认。"
+            return choose_locale_text(
+                interaction_locale,
+                "这条体系建议还不完整，暂时不能直接采纳。",
+                "This system suggestion is incomplete and cannot be applied yet.",
+            )
+        return choose_locale_text(
+            interaction_locale,
+            "这个体系名称和现有内容太接近了，请先调整后再确认。",
+            "This system name is too close to existing content. Adjust it before applying.",
+        )
 
-    return "这条建议暂时还不能直接采纳。"
+    return choose_locale_text(
+        interaction_locale,
+        "这条建议暂时还不能直接采纳。",
+        "This suggestion cannot be applied directly yet.",
+    )
 
 
-_FIELD_LABELS: dict[str, str] = {
+_FIELD_LABELS_ZH: dict[str, str] = {
     "name": "名称",
     "entity_type": "类型",
     "description": "描述",
@@ -567,6 +666,16 @@ _FIELD_LABELS: dict[str, str] = {
     "visibility": "可见性",
     "constraints": "约束",
     "display_type": "展示类型",
+}
+_FIELD_LABELS_EN: dict[str, str] = {
+    "name": "Name",
+    "entity_type": "Type",
+    "description": "Description",
+    "aliases": "Aliases",
+    "label": "Relationship label",
+    "visibility": "Visibility",
+    "constraints": "Constraints",
+    "display_type": "Display type",
 }
 
 _RELATIONSHIP_METADATA_FIELDS = {
@@ -586,6 +695,7 @@ def _build_field_deltas(
     target_id: int | None,
     target_resource: str,
     snapshot: ScopeSnapshot,
+    interaction_locale: str,
 ) -> list[dict[str, Any]]:
     deltas: list[dict[str, Any]] = []
     current: dict[str, Any] = {}
@@ -620,7 +730,11 @@ def _build_field_deltas(
     for field_key, value in delta.items():
         if value is None or field_key in _RELATIONSHIP_METADATA_FIELDS:
             continue
-        label = _FIELD_LABELS.get(field_key, field_key)
+        label = choose_locale_text(
+            interaction_locale,
+            _FIELD_LABELS_ZH.get(field_key, field_key),
+            _FIELD_LABELS_EN.get(field_key, field_key),
+        )
         before = current.get(field_key)
         after = ", ".join(value) if isinstance(value, list) else str(value) if value else ""
         if isinstance(before, list):
@@ -640,7 +754,11 @@ def _build_field_deltas(
             existing = next((item for item in existing_attrs if item.key == key), None)
             deltas.append({
                 "field": f"attribute:{key}",
-                "label": f"属性 · {key}",
+                "label": choose_locale_text(
+                    interaction_locale,
+                    f"属性 · {key}",
+                    f"Attribute · {key}",
+                ),
                 "before": existing.surface if existing else None,
                 "after": surface,
             })

@@ -19,6 +19,7 @@ from app.core.indexing import (
     WindowIndexLifecycleSnapshot,
     inspect_window_index_lifecycle,
 )
+from app.core.copilot.i18n import choose_locale_text
 from app.models import (
     Chapter,
     Novel,
@@ -321,18 +322,24 @@ def load_scope_snapshot(db: Session, novel: Novel, mode: str, scope: str, contex
     )
 
 
-def gather_evidence(db: Session, novel: Novel, snapshot: ScopeSnapshot, context: dict | None) -> list[EvidenceItem]:
+def gather_evidence(
+    db: Session,
+    novel: Novel,
+    snapshot: ScopeSnapshot,
+    context: dict | None,
+    interaction_locale: str = "zh",
+) -> list[EvidenceItem]:
     """Gather evidence from backend-known sources BEFORE the LLM call."""
     items: list[EvidenceItem] = []
 
     if snapshot.profile == "draft_governance":
-        _gather_draft_row_evidence(snapshot, items)
+        _gather_draft_row_evidence(snapshot, items, interaction_locale)
         if snapshot.focus_entity_id is not None:
-            _gather_chapter_evidence(db, novel, context, snapshot, items)
+            _gather_chapter_evidence(db, novel, context, snapshot, items, interaction_locale)
     else:
-        _gather_chapter_evidence(db, novel, context, snapshot, items)
-        _gather_entity_evidence(snapshot, context, items)
-        _gather_relationship_evidence(snapshot, context, items)
+        _gather_chapter_evidence(db, novel, context, snapshot, items, interaction_locale)
+        _gather_entity_evidence(snapshot, context, items, interaction_locale)
+        _gather_relationship_evidence(snapshot, context, items, interaction_locale)
 
     return items[:MAX_EVIDENCE_ITEMS]
 
@@ -343,6 +350,7 @@ def _gather_chapter_evidence(
     context: dict | None,
     snapshot: ScopeSnapshot,
     items: list[EvidenceItem],
+    interaction_locale: str,
 ) -> None:
     """Gather chapter excerpts from window index or tail chapters."""
     from app.core.indexing.window_index import NovelIndex
@@ -377,21 +385,45 @@ def _gather_chapter_evidence(
                                     "start_pos": start,
                                     "end_pos": end,
                                 },
-                                title=f"第{chapter.chapter_number}章 · 位置{start}-{end}",
+                                title=choose_locale_text(
+                                    interaction_locale,
+                                    f"第{chapter.chapter_number}章 · 位置{start}-{end}",
+                                    f"Chapter {chapter.chapter_number} · Position {start}-{end}",
+                                ),
                                 excerpt=text[:MAX_CHAPTER_EXCERPT_CHARS],
-                                why_relevant=f"包含对「{entity.name}」的提及",
+                                why_relevant=choose_locale_text(
+                                    interaction_locale,
+                                    f"包含对「{entity.name}」的提及",
+                                    f'Mentions "{entity.name}"',
+                                ),
                             ))
             except Exception:
                 logger.debug("Window index load failed, falling back to tail chapters", exc_info=True)
 
     if len(items) < 3 and snapshot.focus_variant != "whole_book":
-        fallback_reason = "最近章节上下文"
+        fallback_reason = choose_locale_text(
+            interaction_locale,
+            "最近章节上下文",
+            "Recent chapter context",
+        )
         if lifecycle and lifecycle.status == WINDOW_INDEX_STATUS_STALE:
-            fallback_reason = "章节有更新，先回退到最近章节上下文"
+            fallback_reason = choose_locale_text(
+                interaction_locale,
+                "章节有更新，先回退到最近章节上下文",
+                "The chapters changed, so the run is temporarily falling back to recent chapter context",
+            )
         elif lifecycle and lifecycle.status == WINDOW_INDEX_STATUS_MISSING:
-            fallback_reason = "全书内容还在准备中，先回退到最近章节上下文"
+            fallback_reason = choose_locale_text(
+                interaction_locale,
+                "全书内容还在准备中，先回退到最近章节上下文",
+                "Whole-book content is still being prepared, so the run is temporarily falling back to recent chapter context",
+            )
         elif lifecycle and lifecycle.status == WINDOW_INDEX_STATUS_FAILED:
-            fallback_reason = "全书内容整理失败，先回退到最近章节上下文"
+            fallback_reason = choose_locale_text(
+                interaction_locale,
+                "全书内容整理失败，先回退到最近章节上下文",
+                "Whole-book content failed to organize, so the run is temporarily falling back to recent chapter context",
+            )
         chapters = (
             db.query(Chapter)
             .filter(Chapter.novel_id == novel.id)
@@ -417,35 +449,49 @@ def _gather_chapter_evidence(
                     "start_pos": max(0, len(chapter.content) - MAX_CHAPTER_EXCERPT_CHARS),
                     "end_pos": len(chapter.content),
                 },
-                title=f"第{chapter.chapter_number}章 · 尾部",
+                title=choose_locale_text(
+                    interaction_locale,
+                    f"第{chapter.chapter_number}章 · 尾部",
+                    f"Chapter {chapter.chapter_number} · Tail",
+                ),
                 excerpt=text[:MAX_CHAPTER_EXCERPT_CHARS],
                 why_relevant=fallback_reason,
             ))
 
 
-def _gather_entity_evidence(snapshot: ScopeSnapshot, context: dict | None, items: list[EvidenceItem]) -> None:
+def _gather_entity_evidence(
+    snapshot: ScopeSnapshot,
+    context: dict | None,
+    items: list[EvidenceItem],
+    interaction_locale: str,
+) -> None:
     """Add world-model entity rows as evidence items."""
     target_id = (context or {}).get("entity_id")
     if target_id:
         entity = snapshot.entities_by_id.get(target_id)
         if entity:
-            desc = entity.description[:500] if entity.description else "(无描述)"
+            desc = entity.description[:500] if entity.description else choose_locale_text(interaction_locale, "(无描述)", "(No description)")
             attrs = snapshot.attributes_by_entity.get(entity.id, [])
             attr_text = "; ".join(f"{attr.key}={attr.surface[:80]}" for attr in attrs[:5])
             excerpt = f"{entity.name} ({entity.entity_type}): {desc}"
             if attr_text:
-                excerpt += f"\n属性: {attr_text}"
+                excerpt += choose_locale_text(interaction_locale, f"\n属性: {attr_text}", f"\nAttributes: {attr_text}")
             items.append(EvidenceItem(
                 evidence_id=f"ent_{entity.id}",
                 source_type="world_entity",
                 source_ref={"entity_id": entity.id},
-                title=f"实体 · {entity.name}",
+                title=choose_locale_text(interaction_locale, f"实体 · {entity.name}", f"Entity · {entity.name}"),
                 excerpt=excerpt,
-                why_relevant="当前研究目标实体",
+                why_relevant=choose_locale_text(interaction_locale, "当前研究目标实体", "Current research target entity"),
             ))
 
 
-def _gather_relationship_evidence(snapshot: ScopeSnapshot, context: dict | None, items: list[EvidenceItem]) -> None:
+def _gather_relationship_evidence(
+    snapshot: ScopeSnapshot,
+    context: dict | None,
+    items: list[EvidenceItem],
+    interaction_locale: str,
+) -> None:
     """Add relationship rows as evidence for relationship-scoped work."""
     target_id = (context or {}).get("entity_id")
     if not target_id:
@@ -466,40 +512,52 @@ def _gather_relationship_evidence(snapshot: ScopeSnapshot, context: dict | None,
                     "target_id": relationship.target_id,
                 },
                 title=f"{source_name} --[{relationship.label}]--> {target_name}",
-                excerpt=f"关系: {source_name} → {relationship.label} → {target_name}. {description}",
-                why_relevant="与目标实体相关的已知关系",
+                excerpt=choose_locale_text(
+                    interaction_locale,
+                    f"关系: {source_name} → {relationship.label} → {target_name}. {description}",
+                    f"Relationship: {source_name} → {relationship.label} → {target_name}. {description}",
+                ),
+                why_relevant=choose_locale_text(interaction_locale, "与目标实体相关的已知关系", "Known relationships connected to the target entity"),
             ))
 
 
-def _gather_draft_row_evidence(snapshot: ScopeSnapshot, items: list[EvidenceItem]) -> None:
+def _gather_draft_row_evidence(snapshot: ScopeSnapshot, items: list[EvidenceItem], interaction_locale: str) -> None:
     """Surface draft rows themselves as first-class evidence in draft governance."""
     for entity in snapshot.draft_entities[:6]:
         attrs = snapshot.attributes_by_entity.get(entity.id, [])
         attr_text = "; ".join(f"{attr.key}={attr.surface[:60]}" for attr in attrs[:4])
-        excerpt = f"[草稿实体] {entity.name} ({entity.entity_type})"
+        excerpt = choose_locale_text(
+            interaction_locale,
+            f"[草稿实体] {entity.name} ({entity.entity_type})",
+            f"[Draft entity] {entity.name} ({entity.entity_type})",
+        )
         if entity.description:
-            excerpt += f"\n描述: {entity.description[:200]}"
+            excerpt += choose_locale_text(interaction_locale, f"\n描述: {entity.description[:200]}", f"\nDescription: {entity.description[:200]}")
         else:
-            excerpt += "\n描述: (无描述)"
+            excerpt += choose_locale_text(interaction_locale, "\n描述: (无描述)", "\nDescription: (No description)")
         if attr_text:
-            excerpt += f"\n属性: {attr_text}"
+            excerpt += choose_locale_text(interaction_locale, f"\n属性: {attr_text}", f"\nAttributes: {attr_text}")
         items.append(EvidenceItem(
             evidence_id=f"draft_ent_{entity.id}",
             source_type="world_entity",
             source_ref={"entity_id": entity.id},
-            title=f"草稿实体 · {entity.name}",
+            title=choose_locale_text(interaction_locale, f"草稿实体 · {entity.name}", f"Draft entity · {entity.name}"),
             excerpt=excerpt,
-            why_relevant="当前草稿工作集中的实体",
+            why_relevant=choose_locale_text(interaction_locale, "当前草稿工作集中的实体", "Entity from the current draft workset"),
         ))
 
     for relationship in snapshot.draft_relationships[:6]:
         source = snapshot.entities_by_id.get(relationship.source_id)
         target = snapshot.entities_by_id.get(relationship.target_id)
-        excerpt = f"[草稿关系] {source.name if source else '?'} --[{relationship.label}]--> {target.name if target else '?'}"
+        excerpt = choose_locale_text(
+            interaction_locale,
+            f"[草稿关系] {source.name if source else '?'} --[{relationship.label}]--> {target.name if target else '?'}",
+            f"[Draft relationship] {source.name if source else '?'} --[{relationship.label}]--> {target.name if target else '?'}",
+        )
         if relationship.description:
-            excerpt += f"\n描述: {relationship.description[:200]}"
+            excerpt += choose_locale_text(interaction_locale, f"\n描述: {relationship.description[:200]}", f"\nDescription: {relationship.description[:200]}")
         else:
-            excerpt += "\n描述: (无描述)"
+            excerpt += choose_locale_text(interaction_locale, "\n描述: (无描述)", "\nDescription: (No description)")
         items.append(EvidenceItem(
             evidence_id=f"draft_rel_{relationship.id}",
             source_type="world_relationship",
@@ -508,22 +566,26 @@ def _gather_draft_row_evidence(snapshot: ScopeSnapshot, items: list[EvidenceItem
                 "source_id": relationship.source_id,
                 "target_id": relationship.target_id,
             },
-            title=f"草稿关系 · {relationship.label}",
+            title=choose_locale_text(interaction_locale, f"草稿关系 · {relationship.label}", f"Draft relationship · {relationship.label}"),
             excerpt=excerpt,
-            why_relevant="当前草稿工作集中的关系",
+            why_relevant=choose_locale_text(interaction_locale, "当前草稿工作集中的关系", "Relationship from the current draft workset"),
         ))
 
     for system in snapshot.draft_systems[:4]:
-        excerpt = f"[草稿体系] {system.name}"
+        excerpt = choose_locale_text(
+            interaction_locale,
+            f"[草稿体系] {system.name}",
+            f"[Draft system] {system.name}",
+        )
         if system.description:
-            excerpt += f"\n描述: {system.description[:200]}"
+            excerpt += choose_locale_text(interaction_locale, f"\n描述: {system.description[:200]}", f"\nDescription: {system.description[:200]}")
         items.append(EvidenceItem(
             evidence_id=f"draft_sys_{system.id}",
             source_type="world_system",
             source_ref={"system_id": system.id},
-            title=f"草稿体系 · {system.name}",
+            title=choose_locale_text(interaction_locale, f"草稿体系 · {system.name}", f"Draft system · {system.name}"),
             excerpt=excerpt,
-            why_relevant="当前草稿工作集中的体系",
+            why_relevant=choose_locale_text(interaction_locale, "当前草稿工作集中的体系", "System from the current draft workset"),
         ))
 
 

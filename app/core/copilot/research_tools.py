@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from app.core.copilot.i18n import choose_locale_text
 from sqlalchemy.orm import Session
 
 from app.core.indexing import WINDOW_INDEX_STATUS_FRESH
@@ -102,6 +103,7 @@ def dispatch_tool(
     novel_id: int,
     snapshot: ScopeSnapshot,
     workspace: Workspace,
+    interaction_locale: str = "zh",
 ) -> str:
     """Dispatch a single research tool call."""
     if tool_name == "find":
@@ -113,6 +115,7 @@ def dispatch_tool(
             snapshot.novel,
             snapshot,
             workspace,
+            interaction_locale,
         )
     if tool_name == "open":
         return _tool_open(
@@ -121,10 +124,20 @@ def dispatch_tool(
             db,
             snapshot.novel,
             workspace,
+            interaction_locale,
         )
     if tool_name == "read":
         return _tool_read(tool_args.get("target_refs", []), db, novel_id, snapshot)
-    return json.dumps({"error": f"Unknown tool: {tool_name}"})
+    return json.dumps(
+        {
+            "error": choose_locale_text(
+                interaction_locale,
+                f"未知工具：{tool_name}",
+                f"Unknown tool: {tool_name}",
+            ),
+        },
+        ensure_ascii=False,
+    )
 
 
 def tool_load_scope_snapshot(snapshot: ScopeSnapshot) -> str:
@@ -260,17 +273,18 @@ def _tool_find(
     novel: Novel,
     snapshot: ScopeSnapshot,
     workspace: Workspace,
+    interaction_locale: str = "zh",
 ) -> str:
     packs: list[EvidencePack] = []
 
     if scope_filter in ("world_rows", "all"):
-        packs += _find_from_world_rows(query, snapshot)
+        packs += _find_from_world_rows(query, snapshot, interaction_locale)
 
     if scope_filter in ("story_text", "all"):
         packs += _find_from_window_index(query, db, _novel_id, novel, snapshot)
 
     if scope_filter == "drafts":
-        packs += _find_from_draft_auditors(snapshot)
+        packs += _find_from_draft_auditors(snapshot, interaction_locale)
 
     if len(packs) < 3 and scope_filter in ("story_text", "all"):
         packs += _find_from_chapters(query, db, novel)
@@ -293,7 +307,11 @@ def _tool_find(
     }, ensure_ascii=False)
 
 
-def _find_from_world_rows(query: str, snapshot: ScopeSnapshot) -> list[EvidencePack]:
+def _find_from_world_rows(
+    query: str,
+    snapshot: ScopeSnapshot,
+    interaction_locale: str = "zh",
+) -> list[EvidencePack]:
     packs: list[EvidencePack] = []
     query_terms = _extract_query_terms(query, snapshot.novel_language)
     if not query_terms:
@@ -314,7 +332,11 @@ def _find_from_world_rows(query: str, snapshot: ScopeSnapshot) -> list[EvidenceP
 
         excerpt = f"{entity.name} ({entity.entity_type}): {(entity.description or '')[:300]}"
         if attr_text:
-            excerpt += f"\n属性: {attr_text}"
+            excerpt += choose_locale_text(
+                interaction_locale,
+                f"\n属性: {attr_text}",
+                f"\nAttributes: {attr_text}",
+            )
 
         packs.append(EvidencePack(
             pack_id=make_pack_id(f"pk_ent_{entity.id}", excerpt[:100]),
@@ -351,7 +373,11 @@ def _find_from_world_rows(query: str, snapshot: ScopeSnapshot) -> list[EvidenceP
     for system in snapshot.systems:
         text = f"{system.name} ({system.display_type}): {(system.description or '')[:300]}"
         if system.constraints:
-            text += "\n约束: " + "; ".join(str(item)[:80] for item in system.constraints[:6])
+            text += choose_locale_text(
+                interaction_locale,
+                "\n约束: ",
+                "\nConstraints: ",
+            ) + "; ".join(str(item)[:80] for item in system.constraints[:6])
         match_terms = _summarize_matched_terms(
             _find_term_matches(text, query_terms, language=snapshot.novel_language)
         )
@@ -450,20 +476,27 @@ def _find_from_window_index(
     return packs
 
 
-def _find_from_draft_auditors(snapshot: ScopeSnapshot) -> list[EvidencePack]:
+def _find_from_draft_auditors(
+    snapshot: ScopeSnapshot,
+    interaction_locale: str = "zh",
+) -> list[EvidencePack]:
     packs: list[EvidencePack] = []
 
     for entity in snapshot.draft_entities:
         issues: list[str] = []
         if not entity.description or not entity.description.strip():
-            issues.append("空描述")
+            issues.append(choose_locale_text(interaction_locale, "空描述", "Missing description"))
         if not entity.aliases:
-            issues.append("无别名")
+            issues.append(choose_locale_text(interaction_locale, "无别名", "No aliases"))
         attrs = snapshot.attributes_by_entity.get(entity.id, [])
         if not attrs:
-            issues.append("无属性")
+            issues.append(choose_locale_text(interaction_locale, "无属性", "No attributes"))
         if issues:
-            excerpt = f"[草稿实体] {entity.name} ({entity.entity_type}) — 问题: {', '.join(issues)}"
+            excerpt = choose_locale_text(
+                interaction_locale,
+                f"[草稿实体] {entity.name} ({entity.entity_type}) — 问题: {', '.join(issues)}",
+                f"[Draft entity] {entity.name} ({entity.entity_type}) — Issues: {', '.join(issues)}",
+            )
             packs.append(EvidencePack(
                 pack_id=make_pack_id(f"pk_draft_ent_{entity.id}", excerpt),
                 source_refs=[{"type": "entity", "id": entity.id}],
@@ -478,7 +511,11 @@ def _find_from_draft_auditors(snapshot: ScopeSnapshot) -> list[EvidencePack]:
         if not relationship.description or not relationship.description.strip():
             src = snapshot.entities_by_id.get(relationship.source_id)
             tgt = snapshot.entities_by_id.get(relationship.target_id)
-            excerpt = f"[草稿关系] {src.name if src else '?'} --[{relationship.label}]--> {tgt.name if tgt else '?'} — 空描述"
+            excerpt = choose_locale_text(
+                interaction_locale,
+                f"[草稿关系] {src.name if src else '?'} --[{relationship.label}]--> {tgt.name if tgt else '?'} — 空描述",
+                f"[Draft relationship] {src.name if src else '?'} --[{relationship.label}]--> {tgt.name if tgt else '?'} — Missing description",
+            )
             packs.append(EvidencePack(
                 pack_id=make_pack_id(f"pk_draft_rel_{relationship.id}", excerpt),
                 source_refs=[{"type": "relationship", "id": relationship.id}],
@@ -492,11 +529,15 @@ def _find_from_draft_auditors(snapshot: ScopeSnapshot) -> list[EvidencePack]:
     for system in snapshot.draft_systems:
         issues: list[str] = []
         if not system.description or not system.description.strip():
-            issues.append("空描述")
+            issues.append(choose_locale_text(interaction_locale, "空描述", "Missing description"))
         if not system.constraints:
-            issues.append("无约束")
+            issues.append(choose_locale_text(interaction_locale, "无约束", "No constraints"))
         if issues:
-            excerpt = f"[草稿体系] {system.name} — 问题: {', '.join(issues)}"
+            excerpt = choose_locale_text(
+                interaction_locale,
+                f"[草稿体系] {system.name} — 问题: {', '.join(issues)}",
+                f"[Draft system] {system.name} — Issues: {', '.join(issues)}",
+            )
             packs.append(EvidencePack(
                 pack_id=make_pack_id(f"pk_draft_sys_{system.id}", excerpt),
                 source_refs=[{"type": "system", "id": system.id}],
@@ -568,10 +609,20 @@ def _tool_open(
     db: Session,
     _novel: Novel,
     workspace: Workspace,
+    interaction_locale: str = "zh",
 ) -> str:
     pack = workspace.evidence_packs.get(pack_id)
     if not pack:
-        return json.dumps({"error": f"Unknown pack_id: {pack_id}. Use find() first."})
+        return json.dumps(
+            {
+                "error": choose_locale_text(
+                    interaction_locale,
+                    f"未知线索包：{pack_id}。请先调用 find()。",
+                    f"Unknown pack_id: {pack_id}. Use find() first.",
+                ),
+            },
+            ensure_ascii=False,
+        )
 
     expand_chars = min(expand_chars or 2000, 4000)
     for ref in pack.source_refs:

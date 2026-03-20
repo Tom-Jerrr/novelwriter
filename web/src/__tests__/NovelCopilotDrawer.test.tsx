@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createElement } from 'react'
 import { MemoryRouter, useLocation, useSearchParams } from 'react-router-dom'
+import { UiLocaleProvider } from '@/contexts/UiLocaleContext'
 import {
   NovelCopilotProvider,
 } from '@/components/novel-copilot/NovelCopilotProvider'
@@ -49,6 +50,8 @@ vi.mock('@/services/api', async (importOriginal) => {
 })
 
 beforeEach(() => {
+  localStorage.clear()
+  document.documentElement.lang = 'zh-CN'
   // Copilot API mocks
   mockOpenSession.mockReset().mockResolvedValue({
     session_id: 'backend-session-1',
@@ -137,18 +140,22 @@ function DrawerHarness() {
     MemoryRouter,
     null,
     createElement(
-      QueryClientProvider,
-      { client: queryClient },
+      UiLocaleProvider,
+      null,
       createElement(
-        ToastProvider,
-        null,
+        QueryClientProvider,
+        { client: queryClient },
         createElement(
-          NovelCopilotProvider,
-          { novelId: 1, interactionLocale: 'zh' },
-          createElement(SearchEcho),
-          createElement(SessionCountProbe),
-          createElement(DrawerTriggers),
-          createElement(ConnectedDrawer),
+          ToastProvider,
+          null,
+          createElement(
+            NovelCopilotProvider,
+            { novelId: 1, interactionLocale: 'zh' },
+            createElement(SearchEcho),
+            createElement(SessionCountProbe),
+            createElement(DrawerTriggers),
+            createElement(ConnectedDrawer),
+          ),
         ),
       ),
     ),

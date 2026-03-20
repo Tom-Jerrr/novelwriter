@@ -5,6 +5,8 @@ import type {
   CopilotPrefill,
 } from '@/types/copilot'
 import type { NovelShellRouteState } from '@/components/novel-shell/NovelShellRouteState'
+import { resolveCurrentUiLocale } from '@/lib/uiLocale'
+import { translateUiMessage } from '@/lib/uiMessages'
 
 export type NovelCopilotLaunchArgs = [
   prefill: CopilotPrefill,
@@ -33,13 +35,14 @@ function buildWholeBookContext(routeState: CopilotRouteContext | null | undefine
 export function buildWholeBookCopilotLaunchArgs(
   routeState?: CopilotRouteContext | null,
 ): NovelCopilotLaunchArgs {
+  const locale = resolveCurrentUiLocale()
   return [
     {
       mode: 'research',
       scope: 'whole_book',
       context: buildWholeBookContext(routeState),
     },
-    { displayTitle: '全书探索' },
+    { displayTitle: translateUiMessage(locale, 'copilot.session.title.wholeBook') },
   ]
 }
 
@@ -54,6 +57,7 @@ export function buildCurrentEntityCopilotLaunchArgs({
   surface?: CopilotContextSurface
   stage?: CopilotContextStage
 }): NovelCopilotLaunchArgs {
+  const locale = resolveCurrentUiLocale()
   return [
     {
       mode: 'current_entity',
@@ -70,7 +74,7 @@ export function buildCurrentEntityCopilotLaunchArgs({
             ...(stage ? { stage } : {}),
           },
     },
-    { displayTitle: entityName?.trim() || `实体 ${entityId}` },
+    { displayTitle: entityName?.trim() || translateUiMessage(locale, 'copilot.session.title.entityWithId', { id: entityId }) },
   ]
 }
 
@@ -85,12 +89,13 @@ export function buildRelationshipResearchCopilotLaunchArgs({
   surface: CopilotContextSurface
   stage?: CopilotContextStage
 }): NovelCopilotLaunchArgs {
+  const locale = resolveCurrentUiLocale()
   const normalizedEntityId = typeof entityId === 'number' ? entityId : undefined
   const displayTitle = entityName?.trim()
-    ? `${entityName.trim()} ↔ 相关实体`
+    ? translateUiMessage(locale, 'copilot.session.title.relationshipWithName', { name: entityName.trim() })
     : normalizedEntityId != null
-      ? `实体 ${normalizedEntityId} ↔ 相关实体`
-      : '关系上下文'
+      ? translateUiMessage(locale, 'copilot.session.title.relationshipWithEntityId', { id: normalizedEntityId })
+      : translateUiMessage(locale, 'copilot.session.title.relationshipContext')
 
   return [
     {
@@ -120,6 +125,7 @@ export function buildDraftCleanupCopilotLaunchArgs({
   surface: CopilotContextSurface
   stage?: CopilotContextStage
 }): NovelCopilotLaunchArgs {
+  const locale = resolveCurrentUiLocale()
   return [
     {
       mode: 'draft_cleanup',
@@ -135,6 +141,6 @@ export function buildDraftCleanupCopilotLaunchArgs({
             ...(stage ? { stage } : {}),
           },
     },
-    { displayTitle: '草稿整理' },
+    { displayTitle: translateUiMessage(locale, 'copilot.session.title.draftCleanup') },
   ]
 }

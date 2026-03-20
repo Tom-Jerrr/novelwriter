@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Check, X, ChevronDown, ChevronUp, Navigation2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import type { CopilotSuggestion, CopilotSuggestionTarget } from '@/types/copilot'
 import { getCopilotSuggestionKindMeta } from './novelCopilotView'
 import {
@@ -23,8 +24,9 @@ export function NovelCopilotSuggestionCard({
   onDismiss: (id: string) => void
   onLocateTarget?: (target: CopilotSuggestionTarget) => void
 }) {
+  const { locale, t } = useUiLocale()
   const isApplied = mode === 'applied'
-  const kindMeta = getCopilotSuggestionKindMeta(suggestion.kind)
+  const kindMeta = getCopilotSuggestionKindMeta(suggestion.kind, locale)
   const [isExpanded, setIsExpanded] = useState(false)
 
   return (
@@ -48,14 +50,14 @@ export function NovelCopilotSuggestionCard({
                 {kindMeta.label}
               </span>
               <span className={cn('inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-medium text-muted-foreground/80', copilotPillClassName)}>
-                {suggestion.evidence_ids.length} 条依据
+                {t('copilot.suggestion.evidenceCount', { count: suggestion.evidence_ids.length })}
               </span>
               <span className={cn('inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-medium text-muted-foreground/80', copilotPillClassName)}>
-                {suggestion.preview.actionable ? '可直接采纳' : '仅供参考'}
+                {suggestion.preview.actionable ? t('copilot.suggestion.actionable') : t('copilot.suggestion.referenceOnly')}
               </span>
               {isApplied ? (
                 <span className="inline-flex items-center rounded-full border border-[hsl(var(--foreground)/0.12)] bg-[hsl(var(--foreground)/0.04)] px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.15em] text-foreground/82">
-                  已采纳
+                  {t('copilot.suggestion.applied')}
                 </span>
               ) : null}
             </div>
@@ -92,11 +94,11 @@ export function NovelCopilotSuggestionCard({
         {isExpanded && !isApplied && (
           <div className="mt-4 border-t border-[hsl(var(--foreground)/0.08)] pt-4 pb-2 animate-in slide-in-from-top-2 fade-in duration-300">
             <div className="text-[11px] font-semibold text-foreground/80 mb-2 uppercase tracking-wide">
-              变更预览
+              {t('copilot.suggestion.changePreview')}
             </div>
             <div className="rounded-lg bg-[hsl(var(--foreground)/0.03)] p-3 text-xs leading-5 text-muted-foreground">
               <div className="mb-2 pb-2 border-b border-[hsl(var(--foreground)/0.06)]">
-                <span className="font-medium text-foreground">目标:</span> {suggestion.preview.target_label}
+                <span className="font-medium text-foreground">{t('copilot.suggestion.target')}</span> {suggestion.preview.target_label}
               </div>
               <div className="mb-3 text-[11px] leading-5 text-muted-foreground/80">
                 {suggestion.preview.summary}
@@ -106,11 +108,11 @@ export function NovelCopilotSuggestionCard({
                   <div key={`${suggestion.suggestion_id}-${delta.field}`} className="rounded-md border border-[hsl(var(--foreground)/0.06)] bg-background/40 p-2.5">
                     <div className="mb-1 text-[11px] font-medium text-foreground">{delta.label}</div>
                     <div className="flex gap-2">
-                      <span className="shrink-0 text-[hsl(var(--color-danger))] line-through opacity-70">原值 :</span>
-                      <span>{delta.before ?? '(空)'}</span>
+                      <span className="shrink-0 text-[hsl(var(--color-danger))] line-through opacity-70">{t('copilot.suggestion.previousValue')}</span>
+                      <span>{delta.before ?? t('copilot.suggestion.emptyValue')}</span>
                     </div>
                     <div className="mt-1 flex gap-2">
-                      <span className="shrink-0 font-medium text-[hsl(var(--color-success))]">新值 :</span>
+                      <span className="shrink-0 font-medium text-[hsl(var(--color-success))]">{t('copilot.suggestion.newValue')}</span>
                       <span className="text-foreground/90">{delta.after}</span>
                     </div>
                   </div>
@@ -118,7 +120,7 @@ export function NovelCopilotSuggestionCard({
               </div>
               {suggestion.preview.evidence_quotes.length > 0 && (
                 <div className="mt-3 border-t border-[hsl(var(--foreground)/0.06)] pt-3">
-                  <div className="mb-2 text-[11px] font-medium text-foreground">关键依据</div>
+                  <div className="mb-2 text-[11px] font-medium text-foreground">{t('copilot.suggestion.keyEvidence')}</div>
                   <div className="space-y-2">
                     {suggestion.preview.evidence_quotes.map((quote, index) => (
                       <div key={`${suggestion.suggestion_id}-quote-${index}`} className="rounded-md bg-background/40 px-2.5 py-2 text-[11px] leading-5 text-muted-foreground">
@@ -134,7 +136,7 @@ export function NovelCopilotSuggestionCard({
 
         {isApplied ? (
           <div className="mt-4 flex items-center justify-between gap-2 border-t border-[hsl(var(--foreground)/0.10)] pt-3 text-[11px] text-foreground/72">
-            <span>已采纳此建议。</span>
+            <span>{t('copilot.suggestion.appliedNote')}</span>
             <Check className="h-3.5 w-3.5" />
           </div>
         ) : (
@@ -146,7 +148,7 @@ export function NovelCopilotSuggestionCard({
                 className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] font-medium text-muted-foreground hover:bg-[hsl(var(--foreground)/0.05)] hover:text-foreground transition-colors"
               >
                 {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                {isExpanded ? '收起预览' : '展开预览'}
+                {isExpanded ? t('copilot.suggestion.collapsePreview') : t('copilot.suggestion.expandPreview')}
               </button>
             </div>
 
@@ -158,10 +160,10 @@ export function NovelCopilotSuggestionCard({
                   'inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-muted-foreground hover:text-foreground',
                   copilotPillInteractiveClassName,
                 )}
-                aria-label="查看目标"
+                aria-label={t('copilot.suggestion.locate')}
               >
                 <Navigation2 className="h-3.5 w-3.5" />
-                查看目标
+                {t('copilot.suggestion.locate')}
               </button>
             ) : null}
 
@@ -172,20 +174,20 @@ export function NovelCopilotSuggestionCard({
                 'inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-muted-foreground hover:text-foreground',
                 copilotPillInteractiveClassName,
               )}
-              aria-label="忽略"
+              aria-label={t('copilot.suggestion.dismiss')}
             >
               <X className="h-3.5 w-3.5" />
-              忽略
+              {t('copilot.suggestion.dismiss')}
             </button>
 
               <button
                 type="button"
                 onClick={() => onApply(suggestion.suggestion_id)}
                 disabled={!suggestion.preview.actionable}
-                title={!suggestion.preview.actionable ? (suggestion.preview.non_actionable_reason ?? '当前不能直接采纳') : undefined}
+                title={!suggestion.preview.actionable ? (suggestion.preview.non_actionable_reason ?? t('copilot.suggestion.notActionable')) : undefined}
                 className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[hsl(var(--foreground)/0.12)] bg-foreground px-4 text-xs font-medium text-background shadow-[0_2px_8px_rgba(0,0,0,0.08)] transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-foreground/90 hover:shadow-[0_6px_16px_rgba(0,0,0,0.12)] hover:-translate-y-[1px] active:scale-[0.97] active:duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--foreground)/0.2)] focus-visible:ring-offset-1 focus-visible:ring-offset-background"
               >
-                <Check className="h-3.5 w-3.5" /> 采纳
+                <Check className="h-3.5 w-3.5" /> {t('copilot.suggestion.apply')}
               </button>
             </div>
         )}

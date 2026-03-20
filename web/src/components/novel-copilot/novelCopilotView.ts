@@ -1,48 +1,56 @@
+import { resolveCurrentUiLocale } from '@/lib/uiLocale'
+import { translateUiMessage, type UiLocale } from '@/lib/uiMessages'
 import type { CopilotRunStatus } from '@/types/copilot'
 
-export function getCopilotRunStatusMeta(status: CopilotRunStatus | null) {
+function readLocale(locale?: UiLocale): UiLocale {
+  return locale ?? resolveCurrentUiLocale()
+}
+
+export function getCopilotRunStatusMeta(status: CopilotRunStatus | null, locale?: UiLocale) {
+  const effectiveLocale = readLocale(locale)
   switch (status) {
     case 'queued':
       return {
-        label: '排队中',
+        label: translateUiMessage(effectiveLocale, 'copilot.runStatus.queued'),
         dotClassName: 'bg-[hsl(var(--foreground)/0.38)]',
         toneClassName: 'text-muted-foreground',
       }
     case 'running':
       return {
-        label: '运行中',
+        label: translateUiMessage(effectiveLocale, 'copilot.runStatus.running'),
         dotClassName: 'bg-[hsl(var(--foreground)/0.80)] animate-pulse shadow-[0_0_12px_hsl(var(--foreground)/0.14)]',
         toneClassName: 'text-foreground/80',
       }
     case 'error':
     case 'interrupted':
       return {
-        label: status === 'interrupted' ? '已中断' : '异常',
+        label: translateUiMessage(effectiveLocale, status === 'interrupted' ? 'copilot.runStatus.interrupted' : 'copilot.runStatus.error'),
         dotClassName: 'bg-[hsl(var(--color-danger))] shadow-[0_0_10px_hsl(var(--color-danger)/0.40)]',
         toneClassName: 'text-[hsl(var(--color-danger))]',
       }
     case 'completed':
       return {
-        label: '已完成',
+        label: translateUiMessage(effectiveLocale, 'copilot.runStatus.completed'),
         dotClassName: 'bg-[hsl(var(--foreground)/0.62)]',
         toneClassName: 'text-foreground/70',
       }
     default:
       return {
-        label: '待命',
+        label: translateUiMessage(effectiveLocale, 'copilot.runStatus.idle'),
         dotClassName: 'bg-muted-foreground/70',
         toneClassName: 'text-muted-foreground',
       }
   }
 }
 
-export function getCopilotSuggestionKindMeta(kind: string) {
+export function getCopilotSuggestionKindMeta(kind: string, locale?: UiLocale) {
+  const effectiveLocale = readLocale(locale)
   switch (kind) {
     case 'create_entity':
     case 'update_entity':
     case 'entity_update':
       return {
-        label: '实体',
+        label: translateUiMessage(effectiveLocale, 'copilot.suggestion.kind.entity'),
         chipClassName: 'border-[hsl(var(--foreground)/0.12)] bg-[hsl(var(--foreground)/0.06)] text-foreground/82',
         accentClassName: 'bg-[hsl(var(--foreground)/0.52)]',
       }
@@ -50,7 +58,7 @@ export function getCopilotSuggestionKindMeta(kind: string) {
     case 'update_relationship':
     case 'relationship_update':
       return {
-        label: '关系',
+        label: translateUiMessage(effectiveLocale, 'copilot.suggestion.kind.relationship'),
         chipClassName: 'border-[hsl(var(--foreground)/0.12)] bg-[hsl(var(--foreground)/0.05)] text-foreground/74',
         accentClassName: 'bg-[hsl(var(--foreground)/0.38)]',
       }
@@ -58,7 +66,7 @@ export function getCopilotSuggestionKindMeta(kind: string) {
     case 'update_system':
     case 'system_update':
       return {
-        label: '体系',
+        label: translateUiMessage(effectiveLocale, 'copilot.suggestion.kind.system'),
         chipClassName: 'border-[hsl(var(--foreground)/0.12)] bg-[hsl(var(--foreground)/0.04)] text-foreground/68',
         accentClassName: 'bg-[hsl(var(--foreground)/0.28)]',
       }
@@ -71,36 +79,37 @@ export function getCopilotSuggestionKindMeta(kind: string) {
   }
 }
 
-export function getCopilotEvidenceSourceMeta(sourceType: string) {
+export function getCopilotEvidenceSourceMeta(sourceType: string, locale?: UiLocale) {
+  const effectiveLocale = readLocale(locale)
   switch (sourceType) {
     case 'chapter_excerpt':
       return {
-        label: '章节片段',
+        label: translateUiMessage(effectiveLocale, 'copilot.suggestion.source.chapterExcerpt'),
         chipClassName: 'border-[hsl(var(--foreground)/0.12)] bg-[hsl(var(--foreground)/0.06)] text-foreground/80',
       }
     case 'world_entity':
       return {
-        label: '设定条目',
+        label: translateUiMessage(effectiveLocale, 'copilot.suggestion.source.worldEntity'),
         chipClassName: 'border-[hsl(var(--foreground)/0.12)] bg-[hsl(var(--foreground)/0.06)] text-foreground/80',
       }
     case 'world_relationship':
       return {
-        label: '关系设定',
+        label: translateUiMessage(effectiveLocale, 'copilot.suggestion.source.worldRelationship'),
         chipClassName: 'border-[hsl(var(--foreground)/0.12)] bg-[hsl(var(--foreground)/0.05)] text-foreground/74',
       }
     case 'world_system':
       return {
-        label: '体系设定',
+        label: translateUiMessage(effectiveLocale, 'copilot.suggestion.source.worldSystem'),
         chipClassName: 'border-[hsl(var(--foreground)/0.12)] bg-[hsl(var(--foreground)/0.04)] text-foreground/68',
       }
     case 'evidence_pack':
       return {
-        label: '相关线索',
+        label: translateUiMessage(effectiveLocale, 'copilot.suggestion.source.evidencePack'),
         chipClassName: 'border-[hsl(var(--foreground)/0.12)] bg-[hsl(var(--foreground)/0.05)] text-foreground/74',
       }
     case 'draft_review':
       return {
-        label: '草稿项',
+        label: translateUiMessage(effectiveLocale, 'copilot.suggestion.source.draftReview'),
         chipClassName: 'border-[hsl(var(--foreground)/0.12)] bg-[hsl(var(--foreground)/0.04)] text-foreground/68',
       }
     default:
@@ -108,5 +117,5 @@ export function getCopilotEvidenceSourceMeta(sourceType: string) {
         label: sourceType,
         chipClassName: 'border-[hsl(var(--foreground)/0.10)] bg-[hsl(var(--foreground)/0.04)] text-muted-foreground',
       }
-  }
+    }
 }

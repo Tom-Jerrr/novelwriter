@@ -13,6 +13,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.core.copilot.i18n import choose_locale_text
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -71,19 +72,48 @@ class _ApplyAbort(RuntimeError):
 def _build_apply_error_message(
     code: str,
     suggestion: dict[str, Any] | None = None,
+    interaction_locale: str = "zh",
 ) -> str:
     if code == "suggestion_not_found":
-        return "这条建议已经失效了，请重新生成一次。"
+        return choose_locale_text(
+            interaction_locale,
+            "这条建议已经失效了，请重新生成一次。",
+            "This suggestion is no longer valid. Generate it again.",
+        )
     if code == "already_applied":
-        return "这条建议已经确认过了。"
+        return choose_locale_text(
+            interaction_locale,
+            "这条建议已经确认过了。",
+            "This suggestion was already applied.",
+        )
     if code == "not_actionable":
         reason = ((suggestion or {}).get("preview") or {}).get("non_actionable_reason")
-        return str(reason) if isinstance(reason, str) and reason.strip() else "这条建议目前还不能直接采纳。"
+        return (
+            str(reason)
+            if isinstance(reason, str) and reason.strip()
+            else choose_locale_text(
+                interaction_locale,
+                "这条建议目前还不能直接采纳。",
+                "This suggestion cannot be applied directly right now.",
+            )
+        )
     if code == "copilot_target_stale":
-        return "这条建议对应的内容刚刚发生了变化，请刷新后再试一次。"
+        return choose_locale_text(
+            interaction_locale,
+            "这条建议对应的内容刚刚发生了变化，请刷新后再试一次。",
+            "The underlying content just changed. Refresh and try again.",
+        )
     if code == "dependency_apply_failed":
-        return "这条关系还依赖未确认的实体或设定。请先确认相关实体，再来确认这条关系。"
-    return "这次确认没有成功，请稍后再试。"
+        return choose_locale_text(
+            interaction_locale,
+            "这条关系还依赖未确认的实体或设定。请先确认相关实体，再来确认这条关系。",
+            "This relationship still depends on unconfirmed entities or world details. Confirm those first, then apply the relationship.",
+        )
+    return choose_locale_text(
+        interaction_locale,
+        "这次确认没有成功，请稍后再试。",
+        "The apply step did not succeed. Please try again later.",
+    )
 
 
 def _collect_dependency_suggestion_ids(action: dict[str, Any]) -> list[str]:
@@ -151,7 +181,12 @@ def _resolve_relationship_endpoint_entity_id(
     raise _ApplyDomainError(code="dependency_apply_failed", message="Relationship endpoint unresolved", status_code=409)
 
 
-def apply_suggestions(db: Session, run: CopilotRun, suggestion_ids: list[str]) -> list[ApplyResult]:
+def apply_suggestions(
+    db: Session,
+    run: CopilotRun,
+    suggestion_ids: list[str],
+    interaction_locale: str = "zh",
+) -> list[ApplyResult]:
     """Apply selected suggestions transactionally.
 
     Each top-level suggestion is isolated from the others, but any same-run
@@ -204,7 +239,7 @@ def apply_suggestions(db: Session, run: CopilotRun, suggestion_ids: list[str]) -
             suggestion_id,
             False,
             code,
-            _build_apply_error_message(code, suggestion),
+            _build_apply_error_message(code, suggestion, interaction_locale),
         ))
 
     def _apply_one_inner(
@@ -285,7 +320,7 @@ def apply_suggestions(db: Session, run: CopilotRun, suggestion_ids: list[str]) -
                 suggestion_id,
                 False,
                 error_code,
-                _build_apply_error_message(error_code, suggestion),
+                _build_apply_error_message(error_code, suggestion, interaction_locale),
             ))
         except Exception:
             db.rollback()
@@ -295,7 +330,7 @@ def apply_suggestions(db: Session, run: CopilotRun, suggestion_ids: list[str]) -
                 suggestion_id,
                 False,
                 "apply_error",
-                _build_apply_error_message("apply_error", suggestion),
+                _build_apply_error_message("apply_error", suggestion, interaction_locale),
             ))
 
     for sid in suggestion_ids:

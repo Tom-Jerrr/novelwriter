@@ -271,7 +271,12 @@ def run_apply(
     if run.status != "completed":
         raise HTTPException(status_code=409, detail={"code": "run_not_completed", "message": "Run is not completed"})
 
-    results = apply_suggestions(db, run, body.suggestion_ids)
+    results = apply_suggestions(
+        db,
+        run,
+        body.suggestion_ids,
+        getattr(getattr(run, "session", None), "interaction_locale", "zh"),
+    )
     return CopilotApplyResponse(
         results=[
             CopilotApplyResultItem(

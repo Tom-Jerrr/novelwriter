@@ -8,8 +8,8 @@ import {
 } from '@/types/copilot'
 import { ApiError, copilotApi } from '@/services/api'
 import { useQueryClient } from '@tanstack/react-query'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { useToast } from '@/components/world-model/shared/useToast'
-import { LABELS } from '@/constants/labels'
 import { worldKeys } from '@/hooks/world/keys'
 import { getLlmApiErrorMessage } from '@/lib/llmErrorMessages'
 
@@ -105,11 +105,11 @@ function getNextPollDelayMs(consecutiveFailures: number) {
   return Math.min(POLL_INTERVAL_MS * multiplier, POLL_MAX_BACKOFF_MS)
 }
 
-function getPollFailureMessage(error: unknown) {
+function getPollFailureMessage(error: unknown, message: (key: string) => string) {
   if (error instanceof ApiError && error.status === 404) {
-    return '这轮研究已失效，请重新发起。'
+    return message('copilot.errors.pollRunNotFound')
   }
-  return '连接中断，请稍后重试。'
+  return message('copilot.errors.connectionInterrupted')
 }
 
 function readApiErrorDetailMessage(detail: unknown): string | null {
@@ -176,6 +176,7 @@ export function useNovelCopilotRuns({
   timeoutIdsRef,
   resolveBackendSessionId,
 }: UseNovelCopilotRunsParams): NovelCopilotRunControllerState {
+  const { t } = useUiLocale()
   const sessionsById = useMemo(
     () => new Map(sessions.map((session) => [session.sessionId, session])),
     [sessions],
@@ -219,47 +220,47 @@ export function useNovelCopilotRuns({
     if (result.error_message && result.error_message.trim()) return result.error_message
     switch (result.error_code) {
       case 'copilot_target_stale':
-        return '这条建议对应的内容刚刚发生了变化，请刷新后再试一次。'
+        return t('copilot.errors.applyTargetStale')
       case 'not_actionable':
-        return '这条建议目前还不能直接采纳。'
+        return t('copilot.errors.applyNotActionable')
       case 'suggestion_not_found':
-        return '这条建议已经失效了，请重新生成一次。'
+        return t('copilot.errors.applySuggestionNotFound')
       default:
-        return '这次确认没有成功，请稍后再试。'
+        return t('copilot.errors.applyFailed')
     }
-  }, [])
+  }, [t])
 
   const getRunCreateFailureMessage = useCallback((error: unknown) => {
     if (error instanceof ApiError) {
       switch (error.code) {
         case 'session_run_active':
-          return '当前会话里已有一轮研究正在进行，请等它完成后再继续。'
+          return t('copilot.errors.sessionRunActive')
         case 'too_many_active_runs':
-          return '你当前同时进行的研究轮次已达上限，请先等待其他会话完成。'
+          return t('copilot.errors.tooManyActiveRuns')
         case 'too_many_global_runs':
-          return '当前服务器较忙，正在处理过多的 Copilot 请求，请稍后再试。'
+          return t('copilot.errors.tooManyGlobalRuns')
         case 'resume_run_not_found':
-          return '这轮中断的研究已经找不到了，请直接重新发起一个新问题。'
+          return t('copilot.errors.resumeRunNotFound')
         case 'resume_run_not_interrupted':
-          return '这轮研究当前不处于可恢复状态，请刷新后再试。'
+          return t('copilot.errors.resumeRunNotInterrupted')
         case 'resume_prompt_mismatch':
-          return '恢复旧研究时不能更换问题；如需新问题，请直接在下方输入。'
+          return t('copilot.errors.resumePromptMismatch')
         case 'resume_run_not_resumable':
-          return '这轮中断研究缺少可恢复进度，请直接重新发起。'
+          return t('copilot.errors.resumeRunNotResumable')
         default: {
           if (isQuotaExhaustedApiError(error)) {
-            return '可用额度已用完，请先提交反馈解锁更多额度。'
+            return t('copilot.errors.quotaExhausted')
           }
           const llmMessage = getLlmApiErrorMessage(error)
           if (llmMessage) return llmMessage
-          if (error.status === 429) return '当前请求较多，请稍后再试。'
-          if (error.status === 503) return '当前服务暂时不可用，请稍后再试。'
-          if (error.status === 409) return '当前会话状态暂时不允许发起新的研究，请稍后再试。'
+          if (error.status === 429) return t('copilot.errors.requestBusy')
+          if (error.status === 503) return t('copilot.errors.serviceUnavailable')
+          if (error.status === 409) return t('copilot.errors.sessionConflict')
         }
       }
     }
-    return '暂时无法发起这一轮研究，请稍后重试。'
-  }, [])
+    return t('copilot.errors.runCreateFailed')
+  }, [t])
 
   // -----------------------------------------------------------------------
   // Polling
@@ -324,7 +325,7 @@ export function useNovelCopilotRuns({
             return
           }
 
-          const errorMessage = getPollFailureMessage(error)
+          const errorMessage = getPollFailureMessage(error, (key) => t(key as never))
           setRunsBySessionId((prev) => {
             if (!sessionsByIdRef.current.has(localSessionId)) return prev
             const sessionRuns = prev[localSessionId] ?? []
@@ -342,7 +343,7 @@ export function useNovelCopilotRuns({
     }
 
     schedulePoll(POLL_INTERVAL_MS)
-  }, [setRunsBySessionId, timeoutIdsRef])
+  }, [setRunsBySessionId, t, timeoutIdsRef])
 
   useEffect(() => {
     const session = focusedSession
@@ -412,7 +413,7 @@ export function useNovelCopilotRuns({
           run_id: optimisticRunId,
           status: 'queued',
           prompt,
-          trace: [{ step_id: 's0', kind: 'init', status: 'running', summary: '正在连接...' }],
+          trace: [{ step_id: 's0', kind: 'init', status: 'running', summary: t('copilot.errors.connecting') }],
           evidence: [],
           suggestions: [],
         }),
@@ -452,7 +453,7 @@ export function useNovelCopilotRuns({
         return false
       }
     },
-    [runsBySessionId, setRunsBySessionId, resolveBackendSessionId, startPolling, getRunCreateFailureMessage],
+    [runsBySessionId, setRunsBySessionId, resolveBackendSessionId, startPolling, getRunCreateFailureMessage, t],
   )
 
   const retryInterruptedRun = useCallback(async (sessionId: string, runId: string) => {
@@ -525,10 +526,10 @@ export function useNovelCopilotRuns({
       queryClient.invalidateQueries({ queryKey: worldKeys.all(session.novelId) })
       return resp.results.every((r) => r.success)
     } catch {
-      toast(LABELS.ERROR_CONFIRM_FAILED)
+      toast(t('copilot.errors.applyFailed'))
       return false
     }
-  }, [runsBySessionId, resolveBackendSessionId, setRunsBySessionId, queryClient, toast, getApplyFailureMessage])
+  }, [runsBySessionId, resolveBackendSessionId, setRunsBySessionId, queryClient, toast, getApplyFailureMessage, t])
 
   // -----------------------------------------------------------------------
   // Dismiss suggestions

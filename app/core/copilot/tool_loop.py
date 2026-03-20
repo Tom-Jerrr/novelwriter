@@ -30,16 +30,16 @@ class ToolLoopDeps:
     acquire_llm_slot: Callable[[], Awaitable[Any]]
     release_llm_slot: Callable[[], None]
     build_system_prompt: Callable[[ScopeSnapshot, str, str, dict[str, Any], str], str]
-    build_auto_preload: Callable[[ScopeSnapshot], str]
+    build_auto_preload: Callable[[ScopeSnapshot, str], str]
     should_preload_world_context: Callable[[str], bool]
     load_scope_snapshot: Callable[[Session, Novel, str, str, dict[str, Any] | None], ScopeSnapshot]
-    dispatch_tool: Callable[[str, dict[str, Any], Session, int, ScopeSnapshot, Workspace], str]
+    dispatch_tool: Callable[[str, dict[str, Any], Session, int, ScopeSnapshot, Workspace, str], str]
     tool_load_scope_snapshot: Callable[[ScopeSnapshot], str]
     persist_workspace: Callable[..., bool]
     renew_run_lease: Callable[..., bool]
     extract_llm_kwargs: Callable[[dict[str, Any] | None], dict[str, Any]]
     parse_llm_response: Callable[[str], dict[str, Any]]
-    evidence_from_workspace: Callable[[Workspace, list[EvidenceItem]], list[EvidenceItem]]
+    evidence_from_workspace: Callable[[Workspace, list[EvidenceItem], str], list[EvidenceItem]]
     lease_lost_error_factory: Callable[[str], Exception]
     client_factory: Callable[[], AIClient] = AIClient
 
@@ -116,7 +116,15 @@ def _execute_pending_tool_calls(
                     )
                 tool_result = deps.tool_load_scope_snapshot(snapshot)
             else:
-                tool_result = deps.dispatch_tool(tool_call.name, tool_args, tool_db, novel_id, snapshot, workspace)
+                tool_result = deps.dispatch_tool(
+                    tool_call.name,
+                    tool_args,
+                    tool_db,
+                    novel_id,
+                    snapshot,
+                    workspace,
+                    session_data["interaction_locale"],
+                )
         finally:
             tool_db.close()
 
@@ -128,6 +136,7 @@ def _execute_pending_tool_calls(
                 tool_result=tool_result,
                 round_number=round_number,
                 call_index=workspace.tool_call_count,
+                interaction_locale=session_data["interaction_locale"],
             )
         )
         workspace.pending_tool_calls.pop(0)
@@ -192,7 +201,7 @@ async def run_tool_loop(
         )
         user_content = prompt
         if deps.should_preload_world_context(turn_intent):
-            auto_preload = deps.build_auto_preload(snapshot)
+            auto_preload = deps.build_auto_preload(snapshot, session_data["interaction_locale"])
             user_content = f"{prompt}\n\n---\n[Auto-preloaded world model summary]\n{auto_preload}"
         messages = [{"role": "system", "content": system_prompt}]
         if prior_messages:
@@ -247,7 +256,11 @@ async def run_tool_loop(
             if response.content:
                 messages.append({"role": "assistant", "content": response.content})
             workspace.messages = list(messages)
-            return parsed, deps.evidence_from_workspace(workspace, evidence), workspace
+            return (
+                parsed,
+                deps.evidence_from_workspace(workspace, evidence, session_data["interaction_locale"]),
+                workspace,
+            )
 
         messages.append(
             build_assistant_tool_call_message(
@@ -298,4 +311,8 @@ async def run_tool_loop(
     if response.content:
         messages.append({"role": "assistant", "content": response.content})
     workspace.messages = list(messages)
-    return parsed, deps.evidence_from_workspace(workspace, evidence), workspace
+    return (
+        parsed,
+        deps.evidence_from_workspace(workspace, evidence, session_data["interaction_locale"]),
+        workspace,
+    )

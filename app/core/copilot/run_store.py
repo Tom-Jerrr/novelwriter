@@ -108,9 +108,10 @@ def persist_running_workspace(
             return False
         if worker_id and (ws_run.status != "running" or ws_run.lease_owner != worker_id):
             return False
+        interaction_locale = getattr(getattr(ws_run, "session", None), "interaction_locale", "zh")
 
         ws_run.workspace_json = workspace.to_dict()
-        ws_run.trace_json = build_running_trace(workspace)
+        ws_run.trace_json = build_running_trace(workspace, interaction_locale=interaction_locale)
         if worker_id:
             ws_run.lease_expires_at = _resolve_running_lease_expiry(
                 _utcnow_naive(),
@@ -147,6 +148,7 @@ def persist_completed_run(
             or store_run.lease_owner != worker_id
         ):
             return False
+        interaction_locale = getattr(getattr(store_run, "session", None), "interaction_locale", "zh")
 
         store_run.status = "completed"
         store_run.answer = answer
@@ -158,6 +160,7 @@ def persist_completed_run(
             degraded_reason=degraded_reason,
             evidence_count=len(evidence),
             suggestion_count=len(compiled_suggestions),
+            interaction_locale=interaction_locale,
         )
         store_run.error = None
         store_run.lease_owner = None
